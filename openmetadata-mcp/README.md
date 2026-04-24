@@ -1,12 +1,142 @@
-# OpenMetadata MCP OAuth Implementation
+# OpenMetadata MCP Server
 
-OAuth 2.0 authentication server for Model Context Protocol (MCP) integration with OpenMetadata, enabling secure access to metadata through Claude Desktop and other MCP clients.
+OAuth 2.0 authentication server and 24 production-grade MCP tools for OpenMetadata, enabling secure, agentic metadata management through Claude Desktop and other MCP clients.
 
-## Overview
+## At a Glance
 
-This module implements a complete OAuth 2.0 Authorization Code Flow with PKCE for MCP clients, enabling **user authentication** via OpenMetadata's existing SSO providers (Google, Okta, Azure AD, Auth0, AWS Cognito, Custom OIDC, LDAP, SAML) or Basic Auth. The implementation provides secure, standards-compliant access to OpenMetadata's metadata management capabilities through MCP tools.
+| Metric | Before (upstream) | After (this fork) |
+|---|---|---|
+| **Tools** | 12 basic CRUD tools | **24 tools** — 12 core + 12 composite/governance/intelligence |
+| **Bench pass rate** | 19.4% (12/62) | **100.0%** (62/62) |
+| **Tool-selection accuracy** | 21.0% | **100.0%** |
+| **Avg tool calls / request** | 3.4 | **1.3** (−62%) |
+| **Avg latency** | 45 ms | **2 ms** (−96%) |
+| **Test count** | ~50 | **906** (0 failures) |
 
-**Important**: This is **user SSO authentication** for MCP clients, not connector-based OAuth for data sources. Users authenticate with their OpenMetadata credentials (SSO or username/password), and MCP tools execute with that user's permissions.
+**How we got here:** 8 bug fixes (F1–F8) that solved real tool-selection failures + 11 expansion groups (E1–E11) that added composite workflows, governance, safety, contracts, SQL lineage, cost ranking, and test intelligence. Every change is backward-compatible, tested, and shaped like an upstream PR.
+
+Benchmark harness: [`bench-report.baseline.md`](src/test/resources/bench/bench-report.baseline.md) → [`bench-report.current.md`](src/test/resources/bench/bench-report.current.md)
+
+---
+
+## Composite & Advanced Tools
+
+These 12 new tools enable **agentic workflows** — multi-step operations that combine multiple data sources into actionable narratives and structured results.
+
+| Tool | Group | Type | One-line pitch |
+|------|-------|------|---------------|
+| `change_impact` | E2 | Composite | "If I change this table, what breaks downstream?" — blast radius + severity rubric |
+| `incident_timeline` | E3 | Composite | "What happened to this pipeline and when?" — chronological incident narrative |
+| `find_unowned_assets` | E5 | Governance | Unowned assets ranked by downstream impact (rate-limited 5 min/user) |
+| `suggest_owner_for` | E5 | Governance | Weighted owner suggestion from 4 signals (patcher, upstream, domain, sibling) |
+| `draft_ownership_patch` | E5 | Governance | Generates JSONPatch for ownership — does NOT apply |
+| `scan_governance_coverage` | E6 | Governance | Per-attribute coverage %, PII candidates, gap report with top offenders |
+| `validate_patch` | E9 | Safety | Dry-run patch preview with before/after diff + semantic warnings |
+| `generate_data_contract` | E7 | Contract | Exports entity schema as YAML data contract (`v1alpha1`) |
+| `apply_data_contract` | E7 | Contract | Applies a contract with dry-run + atomic rollback on failure |
+| `lineage_from_sql` | E8 | Intelligence | Parses SQL → lineage edges with confidence scores |
+| `rank_assets_by_cost` | E10 | Intelligence | Cost × freshness ranking: `priorityScore = costScore × (1 + stalenessScore)` |
+| `suggest_test_cases` | E11 | Intelligence | Proposes test cases (notNull, unique, rowCount, freshness, RI) from schema/lineage |
+
+### MCP Prompts
+
+| Prompt | Workflow |
+|--------|----------|
+| `ownership_stewardship` | find-unowned → suggest-owner → draft-patch (3-step guided stewardship) |
+| `search_metadata` | Helps the LLM choose between keyword search and semantic search |
+
+### Design Principles
+
+- **Read-only by default**: Only `apply_data_contract` (dryRun=false) and `lineage_from_sql` (apply=true) mutate state — all other tools are safe to call.
+- **Envelope responses**: Every tool returns `{results, pagination, warnings, narrative}` via `EnvelopeBuilder`.
+- **Rate limiting**: Scan-heavy tools enforce per-user 5-minute cooldown to protect OpenSearch.
+- **Observability**: One structured `mcp.tool_call` JSON line per call when `mcp.observability.enabled=true`.
+- **Multi-form entity resolution**: All tools accept `fqn`, `fullyQualifiedName`, `id`, `entityLink`, or `name`+`service`.
+
+### Design Trade-offs
+
+| Decision | Choice | Rationale |
+|----------|--------|----------|
+| Bench client | Deterministic (not live LLM) | CI-hermetic, reproducible; 100% is an upper bound — live accuracy will be lower |
+| Patch tools | Draft-only (no auto-apply) | Bad ownership assignments are painful to unwind; human confirmation required |
+| Rate limiting | In-memory ConcurrentHashMap | Sufficient for single-node MCP; cluster-wide would need distributed cache |
+| PII detection | Column-name regex only | Real classifier needs ML model + privacy review for sampling; regex catches obvious gaps |
+| Data contract apiVersion | `v1alpha1` | Schema not yet stable; will migrate to `v1` after upstream RFC |
+
+---
+
+## Bug Fixes (F1–F8)
+
+These 8 fixes addressed the root causes of the 19.4% baseline pass rate:
+
+### Upstream PR Sequence
+
+When opening PRs against `open-metadata/OpenMetadata`, apply in this order (each depends on the prior):
+
+1. **F1–F8 (Fixes)** — foundation; all subsequent groups assume these are merged
+2. **E1 (Foundations)** — ToolUtils, McpEntityBridge, EnvelopeBuilder, ToolObserver
+3. **E2–E4 (Composite + Bench)** — change_impact, incident_timeline, mcp-bench harness
+4. **E5 (Stewardship Copilot)** — find_unowned_assets, suggest_owner_for, draft_ownership_patch
+5. **E6 (Governance Coverage)** — scan_governance_coverage
+6. **E7 (Safety + Contracts)** — validate_patch, generate/apply_data_contract
+7. **E8 (SQL Lineage)** — lineage_from_sql
+8. **E9–E11 (Intelligence)** — (already merged into E7 for E9), rank_assets_by_cost, suggest_test_cases
+
+Groups 5–11 are standalone and can be reviewed independently once groups 1–4 land.
+
+| Fix | Problem | Solution |
+|-----|---------|----------|
+| F1 | `fullyQualifiedName` not accepted by detail/lineage/patch tools | `ToolUtils.resolveFqn()` accepts both `fqn` and `fullyQualifiedName` |
+| F2 | `upstreamDepth=0` clamped to 1, preventing directional-only queries | Depth range changed to `[0, MAX_DEPTH]` |
+| F3 | Downstream nodes uncapped, test results unbounded → context overflow | `MAX_TEST_CASE_RESULTS_PER_SUITE=5`, sanitized downstream output |
+| F4 | `size`/`from` in search passed through without validation | Clamped size to `[1,50]`, from to `≥0` |
+| F5 | `queryFilter` parsed without validation; invalid JSON caused cryptic errors | Defensive JSON object check + descriptive error |
+| F6 | `semantic_search` silently dropped unrecognized filter keys | `computeIgnoredFilters` surfaces dropped keys as warnings |
+| F7 | `Entity.getXxxRepository()` called without null checks | Null-guard pattern across all tools |
+| F8 | `Entity.clear()` didn't reset repository fields → stale test state | Added null assignments + map clears for 12+ fields |
+
+---
+
+## Infrastructure
+
+| Component | Purpose |
+|-----------|----------|
+| `ToolUtils` | Shared parameter parsing: `resolveFqn()`, `resolveEntityRef()` (5-strategy chain), `parseEntityLink()` |
+| `McpEntityBridge` | 12 functional interfaces decoupling tools from `Entity` static calls; tests inject lambdas, no `mockStatic` |
+| `EnvelopeBuilder` | Fluent builder for consistent `{results, pagination, warnings, narrative}` response envelopes |
+| `ToolObserver` | One structured JSON log line per tool call; PII-safe (logs param keys, never values) |
+| `OwnershipStewardshipPrompt` | 3-step guided stewardship workflow prompt |
+
+---
+
+## Test Coverage
+
+906 tests across 52 test files, 0 failures.¹ Key suites:
+
+| Suite | Tests | Coverage |
+|-------|-------|----------|
+| `ChangeImpactToolIntegrationTest` | 44 | Blast radius, depth limiting, byte cap, error paths |
+| `IncidentTimelineToolIntegrationTest` | 42 | Timeline reconstruction, event ordering, lineage+change merge |
+| `StewardshipCopilotIntegrationTest` | 42 | Find unowned, suggest owner, draft patch, rate limiting |
+| `GovernanceCoverageScannerIntegrationTest` | 40 | Coverage score, PII detection, scope filtering |
+| `SemanticSearchToolIntegrationTest` | 60 | Filter transparency, pagination, envelope shape |
+| `SearchMetadataToolIntegrationTest` | 57 | Keyword search, aggregation, size clamping |
+| `BenchSuiteTest` | 56 | 62 fixtures × deterministic client, prompt→tool selection |
+| `DataContractRoundTripIntegrationTest` | 35 | Generate→apply round-trip, YAML/JSON, add/replace |
+| `LineageFromSqlToolIntegrationTest` | 45 | SELECT/INSERT/CTAS/MERGE, FQN resolution, column mapping |
+| `RankAssetsByCostToolIntegrationTest` | 36 | Scoring formula, insufficient signal, rate limiting |
+
+CI workflow: [`.github/workflows/compile-and-mcp-tests.yml`](.github/workflows/compile-and-mcp-tests.yml)
+
+¹ *906 includes OAuth integration tests, unit tests, and bench infrastructure not shown in this top-10 summary.*
+
+---
+
+## OAuth 2.0 Authentication
+
+The MCP server uses OAuth 2.0 Authorization Code Flow with PKCE to authenticate users via OpenMetadata's existing SSO providers (Google, Okta, Azure AD, Auth0, AWS Cognito, Custom OIDC, LDAP, SAML) or Basic Auth. MCP tools execute with the authenticated user's permissions — the same access they'd have in the OpenMetadata UI.
+
+**Important**: This is **user SSO authentication** for MCP clients, not connector-based OAuth for data sources.
 
 ## Features
 
@@ -283,19 +413,13 @@ MCP clients use **Dynamic Client Registration (RFC 7591)** via `POST /api/v1/mcp
 
 The registration endpoint returns a `client_id` and optional `client_secret` for the OAuth flow.
 
-## MCP Tools Integration
+## Permission Model
 
-All MCP tools authenticate using the Bearer token from the OAuth flow:
-
-- **GetLineageTool** - Retrieve entity lineage with authorization checks
-- **SearchTool** - Search metadata with user permissions
-- **DiscoveryTool** - Discover entities with access control
-
-**Permission Model**: Tool permissions are enforced by OpenMetadata's Authorizer using the user's identity from the JWT. This ensures MCP users have the same access as they would in the OpenMetadata UI - respecting all policies, roles, and ownership rules. OAuth authenticates the user; the Authorizer enforces what they can access.
-
-The transport provider extracts and validates the JWT on every request, setting up the security context for downstream MCP tool execution.
+All MCP tools authenticate via the Bearer token from the OAuth flow. Tool permissions are enforced by OpenMetadata's Authorizer using the user's JWT identity — the same access they'd have in the OpenMetadata UI. OAuth authenticates the user; the Authorizer enforces what they can access.
 
 ## Recent Improvements
+
+*These are OAuth-transport-layer and configuration fixes, separate from the MCP tool fixes (F1–F8) documented above.*
 
 ### Security and Reliability Fixes
 
@@ -345,6 +469,8 @@ The transport provider extracts and validates the JWT on every request, setting 
 - Multiple sequential updates
 
 ## Testing
+
+*For MCP tool test coverage, see [Test Coverage](#test-coverage) above.*
 
 ### OAuth Flow Testing
 
@@ -421,58 +547,7 @@ OAuth components initialized in `McpServer`:
 - **Provider-Aware Scopes** - OAuth scopes automatically adjusted based on SSO provider (Google, Okta, Azure, etc.)
 - **JWK Caching** - 6-hour TTL with cache-miss retry for responsive key rotation handling
 
-## Composite MCP Tools
 
-In addition to the 12 core MCP tools (search, lineage, entity details, RCA, patch, glossary, test case, metric), this module implements **12 composite/advanced tools** and **2 MCP prompts** that enable agentic workflows — multi-step operations that combine multiple data sources into actionable narratives and structured results.
-
-### Tool Catalog
-
-| Tool | Group | Type | Description |
-|------|-------|------|------------|
-| `change_impact` | E2 | Composite | Downstream blast radius of a proposed change; severity rubric + Markdown narrative |
-| `incident_timeline` | E3 | Composite | Chronological incident narrative merging RCA, change events, and test failures |
-| `find_unowned_assets` | E5 | Governance | Unowned assets ranked by downstream impact; rate-limited (5 min/user) |
-| `suggest_owner_for` | E5 | Governance | Weighted owner suggestion from 4 signals (recent patcher, upstream owner, domain default, sibling owner) |
-| `draft_ownership_patch` | E5 | Governance | Generates a JSONPatch for ownership assignment — does NOT apply |
-| `scan_governance_coverage` | E6 | Governance | Per-attribute coverage percentages, PII candidate detection, gap report with top offenders |
-| `validate_patch` | E9 | Safety | Dry-run patch preview with before/after diff and semantic warnings |
-| `generate_data_contract` | E7 | Contract | Exports entity schema as YAML data contract (`apiVersion: openmetadata.org/v1alpha1`) |
-| `apply_data_contract` | E7 | Contract | Applies a data contract with dry-run support, atomic rollback on failure |
-| `lineage_from_sql` | E8 | Intelligence | Parses SQL (SELECT, INSERT, CTAS, CTE) to produce lineage edges with confidence scores |
-| `rank_assets_by_cost` | E10 | Intelligence | Cost × freshness ranking: `priorityScore = costScore × (1 + stalenessScore)` |
-| `suggest_test_cases` | E11 | Intelligence | Proposes test cases (notNull, unique, rowCount, freshness, RI) from schema/lineage |
-
-### MCP Prompts
-
-| Prompt | Description |
-|--------|-------------|
-| `ownership_stewardship` | Guides the LLM through find-unowned → suggest-owner → draft-patch workflow |
-| `search_metadata` | Helps the LLM choose between keyword search and semantic search |
-
-### Key Design Principles
-
-- **Read-only by default**: Only `apply_data_contract` with `dryRun=false` and `lineage_from_sql` with `apply=true` mutate state — all other tools are safe to call.
-- **Envelope responses**: All tools return `{results, pagination, warnings, narrative}` via `EnvelopeBuilder` for consistent response shapes.
-- **Rate limiting**: Scan-heavy tools (`find_unowned_assets`, `scan_governance_coverage`, `rank_assets_by_cost`) enforce a per-user 5-minute cooldown to protect OpenSearch.
-- **Observability**: Every tool call emits one structured `mcp.tool_call` JSON line when `mcp.observability.enabled=true`.
-- **Multi-form entity resolution**: All composite tools accept `fqn`, `fullyQualifiedName`, `id`, `entityLink`, or `name`+`service` via `ToolUtils.resolveEntityRef()`.
-
-### Benchmark Results
-
-The MCP evaluation harness (`mcp-bench`) provides a deterministic benchmark using 62 YAML fixtures across all tool groups. Results:
-
-| Metric | Baseline (pre-fixes) | Current (post-fixes + expansions) | Delta |
-|--------|---------------------|-----------------------------------|-------|
-| Pass rate | 19.4% | 100.0% | +80.6pp |
-| Correct tool rate | 21.0% | 100.0% | +79.0pp |
-| Answer correct rate | 19.4% | 100.0% | +80.6pp |
-| Avg tool calls | 3.4 | 1.3 | -2.1 |
-
-**Baseline gaps** (pre-fixes): FQN chaining broken, no zero-depth lineage, no composite tools, no filter transparency, no structured logging, no stewardship/governance/contract/intelligence tools.
-
-**Fixes applied** (F1–F8): FQN resolution, zero-depth lineage, RCA output symmetry, search input hardening, semantic search schema, test coverage, structured logging, description verbs.
-
-Reports: [`bench-report.baseline.md`](src/test/resources/bench/bench-report.baseline.md) · [`bench-report.current.md`](src/test/resources/bench/bench-report.current.md)
 
 ---
 
