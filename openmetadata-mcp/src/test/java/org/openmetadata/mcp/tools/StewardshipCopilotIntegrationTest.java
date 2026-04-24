@@ -78,6 +78,9 @@ class StewardshipCopilotIntegrationTest {
 
     // Inject functional interfaces — no mockStatic(Entity.class) needed
     noopAuthorizer = (entityType, op) -> {};
+
+    // Clear rate limit state so no test is blocked by a prior test's rate-limit entry
+    FindUnownedAssetsTool.USER_LAST_CALL_MS.clear();
   }
 
   // ====================== Helper methods ======================
@@ -898,6 +901,95 @@ class StewardshipCopilotIntegrationTest {
       assertThat(narrative).contains("6.0");
       assertThat(narrative).contains("2.0");
       assertThat(narrative).contains("draft_ownership_patch");
+    }
+  }
+
+  // ====================== Rate limiting (R5.9) ======================
+
+  @Nested
+  class RateLimiting {
+
+    private FindUnownedAssetsTool tool;
+
+    @BeforeEach
+    void setUp() {
+      tool = new FindUnownedAssetsTool();
+    }
+
+    @Test
+    void tryAcquireRateLimit_firstCall_returnsNull() {
+      Long result = FindUnownedAssetsTool.tryAcquireRateLimit("new-user");
+      assertThat(result).isNull();
+    }
+
+    @Test
+    void tryAcquireRateLimit_withinCooldown_returnsExactBlockingTimestamp() {
+      String userId = "rate-limited-user";
+      FindUnownedAssetsTool.tryAcquireRateLimit(userId);
+      Long blockedAt = FindUnownedAssetsTool.tryAcquireRateLimit(userId);
+      assertThat(blockedAt).isNotNull();
+    }
+
+    @Test
+    void tryAcquireRateLimit_afterCooldown_returnsNullAndUpdatesTimestamp() {
+      String userId = "expired-user";
+      // Insert a timestamp that is older than the cooldown
+      FindUnownedAssetsTool.USER_LAST_CALL_MS.put(
+          userId,
+          System.currentTimeMillis() - FindUnownedAssetsTool.RATE_LIMIT_COOLDOWN_MS - 5000);
+      Long result = FindUnownedAssetsTool.tryAcquireRateLimit(userId);
+      assertThat(result).isNull();
+    }
+
+    @Test
+    void tryAcquireRateLimit_differentUsers_independent() {
+      FindUnownedAssetsTool.tryAcquireRateLimit("user1");
+      Long blockedAt = FindUnownedAssetsTool.tryAcquireRateLimit("user2");
+      assertThat(blockedAt).isNull(); // user2 is independent of user1
+    }
+
+    @Test
+    void evictStaleEntries_removesExpiredKeepsRecent() {
+      long now = System.currentTimeMillis();
+      FindUnownedAssetsTool.USER_LAST_CALL_MS.put(
+          "expired-user", now - FindUnownedAssetsTool.RATE_LIMIT_COOLDOWN_MS * 3);
+      FindUnownedAssetsTool.USER_LAST_CALL_MS.put(
+          "just-past-user", now - FindUnownedAssetsTool.RATE_LIMIT_COOLDOWN_MS - 5000);
+      FindUnownedAssetsTool.USER_LAST_CALL_MS.put("recent-user", now - 1000);
+      FindUnownedAssetsTool.evictStaleEntries(now);
+      assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).doesNotContainKey("expired-user");
+      assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).containsKey("just-past-user"); // past cooldown but within 2× eviction threshold
+      assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).containsKey("recent-user");
+    }
+
+    @Test
+    void evictStaleEntries_emptyMap_noOp() {
+      FindUnownedAssetsTool.USER_LAST_CALL_MS.clear();
+      FindUnownedAssetsTool.evictStaleEntries(System.currentTimeMillis());
+      assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).isEmpty();
+    }
+
+    @Test
+    void execute_rateLimited_returns429() throws Exception {
+      // First call should succeed (rate limit allows)
+      FindUnownedAssetsTool.tryAcquireRateLimit("test-user");
+
+      // Second call within cooldown should be rate-limited
+      Map<String, Object> params = new HashMap<>();
+      params.put("entityType", "table");
+
+      Map<String, Object> result =
+          tool.execute(
+              params,
+              securityContext,
+              noopAuthorizer,
+              McpEntityBridge.defaultSearchRepositoryProvider(),
+              McpEntityBridge.defaultLineageRepositoryProvider());
+
+      assertThat(result).containsEntry("statusCode", 429);
+      assertThat(result).containsKey("error");
+      assertThat((String) result.get("error")).contains("Rate limit exceeded");
+      assertThat(result).containsKey("retryAfterSeconds");
     }
   }
 

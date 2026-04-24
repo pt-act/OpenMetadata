@@ -421,6 +421,61 @@ OAuth components initialized in `McpServer`:
 - **Provider-Aware Scopes** - OAuth scopes automatically adjusted based on SSO provider (Google, Okta, Azure, etc.)
 - **JWK Caching** - 6-hour TTL with cache-miss retry for responsive key rotation handling
 
+## Composite MCP Tools
+
+In addition to the 12 core MCP tools (search, lineage, entity details, RCA, patch, glossary, test case, metric), this module implements **12 composite/advanced tools** and **2 MCP prompts** that enable agentic workflows — multi-step operations that combine multiple data sources into actionable narratives and structured results.
+
+### Tool Catalog
+
+| Tool | Group | Type | Description |
+|------|-------|------|------------|
+| `change_impact` | E2 | Composite | Downstream blast radius of a proposed change; severity rubric + Markdown narrative |
+| `incident_timeline` | E3 | Composite | Chronological incident narrative merging RCA, change events, and test failures |
+| `find_unowned_assets` | E5 | Governance | Unowned assets ranked by downstream impact; rate-limited (5 min/user) |
+| `suggest_owner_for` | E5 | Governance | Weighted owner suggestion from 4 signals (recent patcher, upstream owner, domain default, sibling owner) |
+| `draft_ownership_patch` | E5 | Governance | Generates a JSONPatch for ownership assignment — does NOT apply |
+| `scan_governance_coverage` | E6 | Governance | Per-attribute coverage percentages, PII candidate detection, gap report with top offenders |
+| `validate_patch` | E9 | Safety | Dry-run patch preview with before/after diff and semantic warnings |
+| `generate_data_contract` | E7 | Contract | Exports entity schema as YAML data contract (`apiVersion: openmetadata.org/v1alpha1`) |
+| `apply_data_contract` | E7 | Contract | Applies a data contract with dry-run support, atomic rollback on failure |
+| `lineage_from_sql` | E8 | Intelligence | Parses SQL (SELECT, INSERT, CTAS, CTE) to produce lineage edges with confidence scores |
+| `rank_assets_by_cost` | E10 | Intelligence | Cost × freshness ranking: `priorityScore = costScore × (1 + stalenessScore)` |
+| `suggest_test_cases` | E11 | Intelligence | Proposes test cases (notNull, unique, rowCount, freshness, RI) from schema/lineage |
+
+### MCP Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `ownership_stewardship` | Guides the LLM through find-unowned → suggest-owner → draft-patch workflow |
+| `search_metadata` | Helps the LLM choose between keyword search and semantic search |
+
+### Key Design Principles
+
+- **Read-only by default**: Only `apply_data_contract` with `dryRun=false` and `lineage_from_sql` with `apply=true` mutate state — all other tools are safe to call.
+- **Envelope responses**: All tools return `{results, pagination, warnings, narrative}` via `EnvelopeBuilder` for consistent response shapes.
+- **Rate limiting**: Scan-heavy tools (`find_unowned_assets`, `scan_governance_coverage`, `rank_assets_by_cost`) enforce a per-user 5-minute cooldown to protect OpenSearch.
+- **Observability**: Every tool call emits one structured `mcp.tool_call` JSON line when `mcp.observability.enabled=true`.
+- **Multi-form entity resolution**: All composite tools accept `fqn`, `fullyQualifiedName`, `id`, `entityLink`, or `name`+`service` via `ToolUtils.resolveEntityRef()`.
+
+### Benchmark Results
+
+The MCP evaluation harness (`mcp-bench`) provides a deterministic benchmark using 62 YAML fixtures across all tool groups. Results:
+
+| Metric | Baseline (pre-fixes) | Current (post-fixes + expansions) | Delta |
+|--------|---------------------|-----------------------------------|-------|
+| Pass rate | 19.4% | 100.0% | +80.6pp |
+| Correct tool rate | 21.0% | 100.0% | +79.0pp |
+| Answer correct rate | 19.4% | 100.0% | +80.6pp |
+| Avg tool calls | 3.4 | 1.3 | -2.1 |
+
+**Baseline gaps** (pre-fixes): FQN chaining broken, no zero-depth lineage, no composite tools, no filter transparency, no structured logging, no stewardship/governance/contract/intelligence tools.
+
+**Fixes applied** (F1–F8): FQN resolution, zero-depth lineage, RCA output symmetry, search input hardening, semantic search schema, test coverage, structured logging, description verbs.
+
+Reports: [`bench-report.baseline.md`](src/test/resources/bench/bench-report.baseline.md) · [`bench-report.current.md`](src/test/resources/bench/bench-report.current.md)
+
+---
+
 ## License
 
 Apache License 2.0

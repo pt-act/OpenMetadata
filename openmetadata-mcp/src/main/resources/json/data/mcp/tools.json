@@ -840,7 +840,7 @@
     },
     {
       "name": "find_unowned_assets",
-      "description": "Finds data assets without owners, ranked by downstream impact. Use this to identify governance gaps and prioritize ownership assignment. Returns a prioritized list where assets with more downstream dependencies rank higher (higher impact if unowned). Supports optional scope filtering by domain or service. After reviewing the list, use `suggest_owner_for` to identify the best owner candidate for each unowned asset, then `draft_ownership_patch` to prepare the ownership assignment for review. This is a read-only tool — it does not modify any entities.",
+      "description": "Finds data assets without owners, ranked by downstream impact. Use this to identify governance gaps and prioritize ownership assignment. Returns a prioritized list where assets with more downstream dependencies rank higher (higher impact if unowned). Supports optional scope filtering by domain or service. Rate-limited: one call per user per 5-minute window (returns 429 if exceeded). After reviewing the list, use `suggest_owner_for` to identify the best owner candidate for each unowned asset, then `draft_ownership_patch` to prepare the ownership assignment for review. This is a read-only tool — it does not modify any entities.",
       "parameters": {
         "description": "Optionally filter by scope (domain/service) and entity type. Default finds unowned tables.",
         "type": "object",

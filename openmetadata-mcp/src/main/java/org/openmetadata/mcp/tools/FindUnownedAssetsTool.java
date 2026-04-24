@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.openmetadata.schema.search.SearchRequest;
 import org.openmetadata.schema.type.MetadataOperation;
@@ -36,6 +37,13 @@ public class FindUnownedAssetsTool implements McpTool {
   private static final int DEFAULT_LIMIT = 25;
   private static final int MAX_LIMIT = 200;
   private static final int MAX_PAYLOAD_BYTES = 8 * 1024; // 8 KB
+
+  /** Per-user rate limit: minimum milliseconds between consecutive calls. 5 minutes. */
+  @VisibleForTesting static final long RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000L;
+
+  /** Tracks the last call timestamp per user for rate limiting. */
+  @VisibleForTesting
+  static final ConcurrentHashMap<String, Long> USER_LAST_CALL_MS = new ConcurrentHashMap<>();
 
   /**
    * Production call — creates default bridge interfaces that delegate to {@link
@@ -86,6 +94,26 @@ public class FindUnownedAssetsTool implements McpTool {
     String entityType = (String) params.getOrDefault("entityType", "table");
 
     authorizer.authorize(entityType, MetadataOperation.VIEW_BASIC);
+
+    // Rate limit: one call per user per 5-minute window
+    String userId = securityContext.getUserPrincipal().getName();
+    Long blockedAt = tryAcquireRateLimit(userId);
+    if (blockedAt != null) {
+      long remainingSeconds =
+          Math.max(1, (RATE_LIMIT_COOLDOWN_MS - (System.currentTimeMillis() - blockedAt)) / 1000);
+      return Map.of(
+          "error",
+          "Rate limit exceeded: please wait "
+              + remainingSeconds
+              + "s before calling find_unowned_assets again",
+          "retryAfterSeconds",
+          remainingSeconds,
+          "statusCode",
+          429);
+    }
+
+    // Evict stale entries to prevent unbounded memory growth
+    evictStaleEntries(System.currentTimeMillis());
 
     LOG.info(
         "Finding unowned assets: entityType={}, scope={}/{}, limit={}",
@@ -155,6 +183,38 @@ public class FindUnownedAssetsTool implements McpTool {
       throws IOException {
     throw new UnsupportedOperationException(
         "FindUnownedAssetsTool does not support limits enforcement.");
+  }
+
+  // ====================== Rate limiting (R5.9) ======================
+
+  /**
+   * Atomically checks and acquires the per-user rate limit.
+   *
+   * <p>Returns {@code null} if this call is allowed (first call or cooldown has elapsed), or the
+   * timestamp of the original call if the user is within the cooldown window. Uses {@code
+   * ConcurrentHashMap.compute()} to guarantee that exactly one concurrent caller per user gets
+   * {@code null}.
+   */
+  @VisibleForTesting
+  static Long tryAcquireRateLimit(String userId) {
+    long now = System.currentTimeMillis();
+    Long[] blockedAt = {null};
+    USER_LAST_CALL_MS.compute(
+        userId,
+        (k, lastCall) -> {
+          if (lastCall != null && (now - lastCall) < RATE_LIMIT_COOLDOWN_MS) {
+            blockedAt[0] = lastCall; // signal rejection
+            return lastCall; // don't update timestamp
+          }
+          return now; // record this call
+        });
+    return blockedAt[0]; // null = allowed, non-null = blocked (value = original call timestamp)
+  }
+
+  /** Evicts stale entries from the rate limit map to prevent unbounded memory growth. */
+  @VisibleForTesting
+  static void evictStaleEntries(long now) {
+    USER_LAST_CALL_MS.entrySet().removeIf(e -> (now - e.getValue()) > RATE_LIMIT_COOLDOWN_MS * 2);
   }
 
   // ====================== Search for unowned assets (R5.2) ======================
