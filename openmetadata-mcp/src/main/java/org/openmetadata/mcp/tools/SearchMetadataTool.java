@@ -18,7 +18,6 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.openmetadata.schema.search.SearchRequest;
 import org.openmetadata.schema.utils.JsonUtils;
-import org.openmetadata.service.Entity;
 import org.openmetadata.service.limits.Limits;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
@@ -88,9 +87,26 @@ public class SearchMetadataTool implements McpTool {
           "domains",
           "embeddings");
 
+  /**
+   * Production call — creates default bridge interfaces that delegate to {@link
+   * org.openmetadata.service.Entity} static methods.
+   */
   @Override
   public Map<String, Object> execute(
       Authorizer authorizer, CatalogSecurityContext securityContext, Map<String, Object> params)
+      throws IOException {
+    return execute(params, securityContext, McpEntityBridge.defaultSearchRepositoryProvider());
+  }
+
+  /**
+   * Test-friendly overload — accepts injected {@link McpEntityBridge.SearchRepositoryProvider}
+   * to eliminate the need for {@code mockStatic(Entity.class)}.
+   */
+  @VisibleForTesting
+  Map<String, Object> execute(
+      Map<String, Object> params,
+      CatalogSecurityContext securityContext,
+      McpEntityBridge.SearchRepositoryProvider searchRepoProvider)
       throws IOException {
     LOG.info("Executing searchMetadata with params: {}", params);
     String query = params.containsKey("query") ? (String) params.get("query") : "*";
@@ -125,7 +141,10 @@ public class SearchMetadataTool implements McpTool {
       }
     }
 
-    size = Math.min(size, 50);
+    // Clamp size to 1..50 — at least one result required; cap prevents context overflow
+    size = Math.max(Math.min(size, 50), 1);
+    // Clamp from to >= 0 — negative offsets are invalid
+    from = Math.max(from, 0);
 
     boolean includeDeleted = false;
     if (params.containsKey("includeDeleted")) {
@@ -180,16 +199,29 @@ public class SearchMetadataTool implements McpTool {
     String queryFilter = null;
     if (params.containsKey("queryFilter")) {
       queryFilter = (String) params.get("queryFilter");
-      JsonNode queryNode = JsonUtils.getObjectMapper().readTree(queryFilter);
+      try {
+        JsonNode queryNode = JsonUtils.getObjectMapper().readTree(queryFilter);
 
-      if (!queryNode.has("query")) {
-        ObjectNode queryWrapper = JsonUtils.getObjectMapper().createObjectNode();
-        queryWrapper.set("query", queryNode);
-        queryFilter = JsonUtils.pojoToJson(queryWrapper);
-      } else {
-        queryFilter = JsonUtils.pojoToJson(queryNode);
+        // Validate that the parsed JSON is an object — readTree("\"hello\"") parses
+        // successfully but isn't a valid ES filter object
+        if (!queryNode.isObject()) {
+          return Map.of(
+              "error",
+              "queryFilter must be a JSON object, received: "
+                  + queryNode.getNodeType().name().toLowerCase());
+        }
+
+        if (!queryNode.has("query")) {
+          ObjectNode queryWrapper = JsonUtils.getObjectMapper().createObjectNode();
+          queryWrapper.set("query", queryNode);
+          queryFilter = JsonUtils.pojoToJson(queryWrapper);
+        } else {
+          queryFilter = JsonUtils.pojoToJson(queryNode);
+        }
+        LOG.debug("Applied query filter to query: {}", queryFilter);
+      } catch (Exception e) {
+        return Map.of("error", "Invalid queryFilter JSON: " + e.getMessage());
       }
-      LOG.debug("Applied query filter to query: {}", queryFilter);
     }
 
     LOG.info(
@@ -199,13 +231,19 @@ public class SearchMetadataTool implements McpTool {
         size,
         includeDeleted);
 
+    var searchRepo = searchRepoProvider.getSearchRepository();
+    if (searchRepo == null) {
+      LOG.warn("Search repository not initialized — cannot search metadata");
+      return createEmptyResponse();
+    }
+
     SearchRequest searchRequest;
     if (!nullOrEmpty(queryFilter)) {
       // When queryFilter is provided, use it directly as it's already a transformed OpenSearch
       // query
       searchRequest =
           new SearchRequest()
-              .withIndex(Entity.getSearchRepository().getIndexOrAliasName(index))
+              .withIndex(searchRepo.getIndexOrAliasName(index))
               .withQueryFilter(queryFilter)
               .withSize(size)
               .withFrom(from)
@@ -216,7 +254,7 @@ public class SearchMetadataTool implements McpTool {
       searchRequest =
           new SearchRequest()
               .withQuery(query)
-              .withIndex(Entity.getSearchRepository().getIndexOrAliasName(index))
+              .withIndex(searchRepo.getIndexOrAliasName(index))
               .withSize(size)
               .withFrom(from)
               .withFetchSource(true)
@@ -227,10 +265,15 @@ public class SearchMetadataTool implements McpTool {
     Response response;
     if (!nullOrEmpty(queryFilter)) {
       // Use direct query method when queryFilter is provided since it's already a transformed query
-      response = Entity.getSearchRepository().searchWithDirectQuery(searchRequest, subjectContext);
+      response = searchRepo.searchWithDirectQuery(searchRequest, subjectContext);
     } else {
       // Use regular search for basic queries
-      response = Entity.getSearchRepository().search(searchRequest, subjectContext);
+      response = searchRepo.search(searchRequest, subjectContext);
+    }
+
+    if (response == null) {
+      LOG.warn("Search repository returned null response for query '{}'", query);
+      return createEmptyResponse();
     }
 
     Map<String, Object> searchResponse;
@@ -244,7 +287,13 @@ public class SearchMetadataTool implements McpTool {
     }
 
     return buildEnhancedSearchResponse(
-        searchResponse, query, size, requestedFields, includeAggregations, maxAggregationBuckets);
+        searchResponse,
+        query,
+        from,
+        size,
+        requestedFields,
+        includeAggregations,
+        maxAggregationBuckets);
   }
 
   @Override
@@ -261,6 +310,7 @@ public class SearchMetadataTool implements McpTool {
   static Map<String, Object> buildEnhancedSearchResponse(
       Map<String, Object> searchResponse,
       String query,
+      int from,
       int requestedLimit,
       List<String> requestedFields,
       boolean includeAggregations,
@@ -300,8 +350,16 @@ public class SearchMetadataTool implements McpTool {
       }
     }
 
-    Map<String, Object> result = new HashMap<>();
-    result.put("results", cleanedResults);
+    // Build envelope response (E1.8 — Expansions spec R1.4)
+    EnvelopeBuilder envelope =
+        EnvelopeBuilder.create()
+            .results(cleanedResults)
+            .pagination(from, requestedLimit, totalResults);
+
+    // Backward-compat fields kept for existing consumers
+    // (totalFound, returnedCount, query, usage) — not inside the envelope spec but preserved
+    // to avoid breaking existing callers. Can be deprecated in a future release.
+    Map<String, Object> result = new HashMap<>(envelope.build());
     result.put("totalFound", totalResults);
     result.put("returnedCount", cleanedResults.size());
     result.put("query", query);
@@ -329,11 +387,6 @@ public class SearchMetadataTool implements McpTool {
     }
 
     if (totalResults > requestedLimit) {
-      result.put(
-          "message",
-          String.format(
-              "Found %d total results, showing first %d. Use pagination or refine your search for more specific results, you can call these 3 times by yourself with pagination , and then only if the user ask for more paginate.",
-              totalResults, cleanedResults.size()));
       result.put("hasMore", true);
     }
 
@@ -369,8 +422,9 @@ public class SearchMetadataTool implements McpTool {
   }
 
   public static Map<String, Object> createEmptyResponse() {
-    Map<String, Object> result = new HashMap<>();
-    result.put("results", Collections.emptyList());
+    Map<String, Object> result =
+        new HashMap<>(
+            EnvelopeBuilder.create().results(Collections.emptyList()).pagination(0, 0, 0).build());
     result.put("totalFound", 0);
     result.put("returnedCount", 0);
     result.put("message", "No results found");

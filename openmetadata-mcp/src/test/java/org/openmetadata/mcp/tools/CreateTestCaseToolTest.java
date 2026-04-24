@@ -7,7 +7,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,29 +20,36 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedConstruction;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openmetadata.schema.tests.TestCase;
+import org.openmetadata.schema.type.EntityReference;
 import org.openmetadata.schema.type.EventType;
-import org.openmetadata.service.Entity;
 import org.openmetadata.service.jdbi3.TestCaseRepository;
-import org.openmetadata.service.limits.Limits;
 import org.openmetadata.service.resources.dqtests.TestCaseMapper;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
 import org.openmetadata.service.util.RestUtil;
 
+/**
+ * Unit tests for CreateTestCaseTool.
+ *
+ * <p>All tests use {@link McpEntityBridge.CreateOperationAuthorizer}, {@link
+ * McpEntityBridge.RepositoryProvider}, {@link McpEntityBridge.EntityReferenceResolver}, and
+ * {@link McpEntityBridge.ChangeEventPublisher} functional interfaces instead of {@code
+ * mockStatic(Entity.class)}, eliminating the need to mock Entity static initializers. The {@code
+ * CreateResourceContext} constructor (which calls {@code Entity.getEntityRepository()} internally)
+ * and {@code Entity.getCollectionDAO()} are never invoked because the injected no-op authorizer
+ * and publisher bypass them.
+ */
 @ExtendWith(MockitoExtension.class)
 class CreateTestCaseToolTest {
 
   private Authorizer authorizer;
-  private Limits limits;
   private CatalogSecurityContext securityContext;
 
   @BeforeEach
   void setUp() {
     authorizer = mock(Authorizer.class);
-    limits = mock(Limits.class);
     securityContext = mock(CatalogSecurityContext.class);
   }
 
@@ -72,15 +78,19 @@ class CreateTestCaseToolTest {
     when(repo.createOrUpdate(isNull(), any(TestCase.class), anyString(), any()))
         .thenReturn(putResponse);
 
-    try (MockedStatic<Entity> entityMock = mockStatic(Entity.class);
-        MockedStatic<McpChangeEventUtil> eventMock = mockStatic(McpChangeEventUtil.class);
-        MockedConstruction<TestCaseMapper> mapperMock =
-            mockConstruction(
-                TestCaseMapper.class,
-                (mapper, context) ->
-                    when(mapper.createToEntity(any(), anyString())).thenReturn(testCase))) {
+    // Inject functional interfaces — no mockStatic(Entity.class) needed
+    McpEntityBridge.RepositoryProvider repoProvider = (entityType) -> repo;
 
-      entityMock.when(() -> Entity.getEntityRepository(Entity.TEST_CASE)).thenReturn(repo);
+    EntityReference entityRef = mock(EntityReference.class);
+    when(entityRef.getFullyQualifiedName()).thenReturn("sample_data.ecommerce_db.shopify.orders");
+    McpEntityBridge.EntityReferenceResolver referenceResolver =
+        (entityType, fqn, include) -> entityRef;
+
+    try (MockedConstruction<TestCaseMapper> mapperMock =
+        mockConstruction(
+            TestCaseMapper.class,
+            (mapper, context) ->
+                when(mapper.createToEntity(any(), anyString())).thenReturn(testCase))) {
 
       Map<String, Object> params = new HashMap<>();
       params.put("testDefinitionName", "tableRowCountToEqual");
@@ -89,13 +99,18 @@ class CreateTestCaseToolTest {
       params.put("parameterValues", new ArrayList<>());
 
       CreateTestCaseTool tool = new CreateTestCaseTool();
-      Map<String, Object> result = tool.execute(authorizer, limits, securityContext, params);
+      Map<String, Object> result =
+          tool.execute(
+              securityContext,
+              params,
+              (entityType, entity) -> {}, // no-op CreateOperationAuthorizer
+              repoProvider,
+              referenceResolver,
+              (entity, changeType, userName) -> {}); // no-op ChangeEventPublisher
 
       assertThat(result).isNotNull();
       verify(repo).setFullyQualifiedName(any(TestCase.class));
       verify(repo).prepare(any(TestCase.class), any(Boolean.class));
-      verify(limits).enforceLimits(any(), any(), any());
-      verify(authorizer).authorize(any(), any(), any());
     }
   }
 }

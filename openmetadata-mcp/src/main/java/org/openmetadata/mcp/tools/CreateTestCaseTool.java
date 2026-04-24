@@ -1,13 +1,15 @@
 package org.openmetadata.mcp.tools;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.openmetadata.schema.api.tests.CreateTestCase;
 import org.openmetadata.schema.tests.TestCase;
 import org.openmetadata.schema.tests.TestCaseParameterValue;
-import org.openmetadata.schema.type.MetadataOperation;
+import org.openmetadata.schema.type.EntityReference;
 import org.openmetadata.schema.utils.JsonUtils;
 import org.openmetadata.service.Entity;
 import org.openmetadata.service.jdbi3.TestCaseRepository;
@@ -17,8 +19,6 @@ import org.openmetadata.service.resources.feeds.MessageParser;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.ImpersonationContext;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
-import org.openmetadata.service.security.policyevaluator.CreateResourceContext;
-import org.openmetadata.service.security.policyevaluator.OperationContext;
 import org.openmetadata.service.util.RestUtil;
 
 @Slf4j
@@ -53,23 +53,65 @@ public class CreateTestCaseTool implements McpTool {
         updatedBy);
   }
 
+  /**
+   * Production call — creates default bridge interfaces that delegate to {@link Entity} static
+   * methods and the real authorizer/limits.
+   */
   @Override
   public Map<String, Object> execute(
       Authorizer authorizer,
       Limits limits,
       CatalogSecurityContext catalogSecurityContext,
       Map<String, Object> params) {
+    return execute(
+        catalogSecurityContext,
+        params,
+        McpEntityBridge.defaultCreateOperationAuthorizer(
+            authorizer, limits, catalogSecurityContext),
+        McpEntityBridge.defaultRepositoryProvider(),
+        McpEntityBridge.defaultEntityReferenceResolver(),
+        McpEntityBridge.defaultChangeEventPublisher());
+  }
+
+  /**
+   * Test-friendly overload — accepts a {@link McpEntityBridge.CreateOperationAuthorizer},
+   * {@link McpEntityBridge.RepositoryProvider}, {@link McpEntityBridge.EntityReferenceResolver},
+   * and {@link McpEntityBridge.ChangeEventPublisher} for dependency injection. Tests inject a
+   * no-op authorizer and lambdas that return mock repositories/references, eliminating the need
+   * for {@code mockStatic(Entity.class)} — the {@code CreateResourceContext} constructor and
+   * {@code Entity.getCollectionDAO()} are never called.
+   */
+  @VisibleForTesting
+  Map<String, Object> execute(
+      CatalogSecurityContext catalogSecurityContext,
+      Map<String, Object> params,
+      McpEntityBridge.CreateOperationAuthorizer<TestCase> createOpAuthorizer,
+      McpEntityBridge.RepositoryProvider repoProvider,
+      McpEntityBridge.EntityReferenceResolver referenceResolver,
+      McpEntityBridge.ChangeEventPublisher changeEventPublisher) {
     String testDefinitionName = (String) params.get("testDefinitionName");
-    String fqn = (String) params.get("fqn");
     if (testDefinitionName == null || testDefinitionName.trim().isEmpty()) {
       throw new IllegalArgumentException("Parameter 'testDefinitionName' is required");
-    }
-    if (fqn == null || fqn.trim().isEmpty()) {
-      throw new IllegalArgumentException("Parameter 'fqn' is required");
     }
 
     String entityType =
         params.containsKey("entityType") ? (String) params.get("entityType") : "table";
+
+    // Use resolveEntityRef for multi-form entity identification (E1.5)
+    // Supports: fqn, fullyQualifiedName, id, entityLink
+    // Note: 'name' key is excluded from entityRefParams because 'name' means
+    // "test case name" in this tool, not "entity name". This prevents
+    // resolveEntityRef Strategy 4 from incorrectly constructing a composite FQN
+    // using the test case name as the entity name.
+    Map<String, Object> entityRefParams = new HashMap<>(params);
+    entityRefParams.remove("name");
+    entityRefParams.remove("parameterValues");
+    entityRefParams.remove("description");
+    entityRefParams.remove("testDefinitionName");
+    entityRefParams.remove("columnName");
+    EntityReference entityRef =
+        ToolUtils.resolveEntityRef(entityRefParams, entityType, referenceResolver);
+    String fqn = entityRef.getFullyQualifiedName();
     String description =
         params.containsKey("description")
             ? (String) params.get("description")
@@ -98,17 +140,15 @@ public class CreateTestCaseTool implements McpTool {
         getTestCase(
             name, description, entityLinkValue, testDefinitionName, parameterValue, updatedBy);
 
+    // Use injected RepositoryProvider instead of Entity.getEntityRepository() directly
     TestCaseRepository repository =
-        (TestCaseRepository) Entity.getEntityRepository(Entity.TEST_CASE);
+        (TestCaseRepository) repoProvider.getEntityRepository(Entity.TEST_CASE);
     repository.setFullyQualifiedName(testCase);
     repository.prepare(testCase, false);
 
-    OperationContext operationContext =
-        new OperationContext(Entity.TEST_CASE, MetadataOperation.CREATE);
-    CreateResourceContext<TestCase> createResourceContext =
-        new CreateResourceContext<>(Entity.TEST_CASE, testCase);
-    limits.enforceLimits(catalogSecurityContext, createResourceContext, operationContext);
-    authorizer.authorize(catalogSecurityContext, operationContext, createResourceContext);
+    // Use injected CreateOperationAuthorizer — no CreateResourceContext constructed when
+    // a test injects a no-op authorizer, so Entity.getEntityRepository() is never called
+    createOpAuthorizer.authorizeCreate(Entity.TEST_CASE, testCase);
 
     LOG.info(
         "Creating test case '{}' with definition '{}' for entity: {}",
@@ -118,8 +158,24 @@ public class CreateTestCaseTool implements McpTool {
     String impersonatedBy = ImpersonationContext.getImpersonatedBy();
     RestUtil.PutResponse<TestCase> response =
         repository.createOrUpdate(null, testCase, updatedBy, impersonatedBy);
-    McpChangeEventUtil.publishChangeEvent(
+    changeEventPublisher.publishChangeEvent(
         response.getEntity(), response.getChangeType(), updatedBy);
-    return JsonUtils.getMap(response.getEntity());
+
+    // Wrap in envelope for consistency with other MCP tools (E1.8)
+    Map<String, Object> entityData = JsonUtils.getMap(response.getEntity());
+    EnvelopeBuilder envelope =
+        EnvelopeBuilder.create()
+            .results(entityData != null ? List.of(entityData) : List.of())
+            .narrative(
+                String.format(
+                    "Created test case '%s' with definition '%s' for entity '%s'.",
+                    name, testDefinitionName, fqn));
+    Map<String, Object> result = new HashMap<>(envelope.build());
+    // Backward-compat fields kept for existing consumers
+    result.put("fqn", fqn);
+    result.put("entityType", entityType);
+    result.put("testDefinitionName", testDefinitionName);
+    result.put("testCaseName", name);
+    return result;
   }
 }

@@ -522,6 +522,62 @@ Always import from `generated/` for API response types. Never hand-write interfa
 
 ---
 
+## MCP Agentic Expansions
+
+The `openmetadata-mcp` module provides an agentic platform layer on top of the OpenMetadata catalog. Tools implement the `McpTool` interface and are registered in `tools.json`.
+
+### Architecture
+
+- **Tool interface:** `McpTool.execute(params, authorizer, catalogSecurityContext)` — all tools follow the same contract
+- **Observability:** Every tool call is wrapped by `ToolObserver.observe()` in `DefaultToolContext.callTool()` — one structured JSON log line per invocation (tool, paramKeys, outcome, durationMs, errorClass)
+- **Entity resolution:** `ToolUtils.resolveEntityRef(params, entityType)` — 5-form chain: fqn → fullyQualifiedName → id → entityLink → name+service
+- **Response envelopes:** `EnvelopeBuilder` produces consistent shapes: `{results, pagination, warnings, narrative}`
+- **Null-guard pattern:** Cache `Entity.getXxxRepository()` in local var, check null with LOG.warn + graceful fallback, use local var (prevents NPE/TOCTOU)
+- **Byte caps:** Composite tools enforce payload limits (change_impact <8KB, incident_timeline <6KB) with truncation + warnings
+
+### Implemented Tools (24 total)
+
+| Tool | Group | Type | Description |
+|------|-------|------|------------|
+| `search_metadata` | F3 | Read | Keyword search with OpenSearch aggregations |
+| `semantic_search` | F5 | Read | Vector similarity search with embeddings |
+| `get_entity_details` | F1 | Read | Entity detail with FQN alias support |
+| `get_entity_lineage` | F2 | Read | Lineage traversal with zero-depth support |
+| `root_cause_analysis` | F4 | Read | Upstream failure chain with cleaned output |
+| `patch_entity` | — | Write | JSON Patch on any entity |
+| `create_lineage` | — | Write | Create lineage edges between entities |
+| `create_test_case` | — | Write | Create data quality test cases |
+| `get_test_definitions` | — | Read | List available test definitions catalog |
+| `create_glossary` / `create_glossary_term` | — | Write | Create glossary entities |
+| `create_metric` | — | Write | Create metrics |
+| `change_impact` | E2 | Composite | What breaks if I change X? — severity + narrative |
+| `incident_timeline` | E3 | Composite | Incident narrative — timeline + owners + root cause |
+| `find_unowned_assets` | E5 | Governance | Fleet-level unowned asset discovery |
+| `suggest_owner_for` | E5 | Governance | Weighted owner candidate ranking |
+| `draft_ownership_patch` | E5 | Governance | JSONPatch preview for ownership assignment |
+| `scan_governance_coverage` | E6 | Governance | Coverage % per attribute per domain + PII candidates |
+| `validate_patch` | E9 | Safety | Dry-run patch preview with diff + downstream count + warnings |
+| `generate_data_contract` / `apply_data_contract` | E7 | Contract | YAML round-trip for data contracts |
+| `lineage_from_sql` | E8 | Intelligence | SQL→lineage via JSQLParser with confidence scores |
+| `rank_assets_by_cost` | E10 | Intelligence | Cost × freshness ranking |
+| `suggest_test_cases` | E11 | Intelligence | Test case proposals from schema/lineage |
+
+### Evaluation Harness
+
+`mcp-bench` (Group E4) provides a deterministic benchmark: 62 YAML fixtures, `DeterministicBenchLlmClient` for CI-hermetic runs, reports at `bench-report.baseline.md` (19.4% pass) and `bench-report.current.md` (100% pass).
+
+### Key Source Directories
+
+```
+openmetadata-mcp/src/main/java/org/openmetadata/mcp/tools/   — Tool implementations
+openmetadata-mcp/src/main/resources/json/data/mcp/tools.json — Tool schema definitions
+openmetadata-mcp/src/test/java/org/openmetadata/mcp/tools/   — Integration tests
+openmetadata-mcp/src/test/bench/                               — Benchmark harness
+openmetadata-mcp/src/test/resources/bench/fixtures/            — Benchmark YAML fixtures
+```
+
+---
+
 ## Cross-Cutting Patterns
 
 ### Design Patterns Used Across the Codebase

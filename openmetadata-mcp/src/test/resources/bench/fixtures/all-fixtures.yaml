@@ -1,0 +1,632 @@
+fixtures:
+  # ── Search / Semantic Search Selection ──
+  - id: search-keyword-lookup
+    prompt: "Find tables owned by the marketing team"
+    expectedTools:
+      - search_metadata
+    forbiddenTools: []
+    goldAnswerContains:
+      - "search_metadata"
+    maxToolCalls: 2
+
+  - id: search-exact-name
+    prompt: "Find the table named orders_fact"
+    expectedTools:
+      - search_metadata
+    forbiddenTools: []
+    goldAnswerContains:
+      - "search_metadata"
+    maxToolCalls: 2
+
+  - id: semantic-exploratory
+    prompt: "Find tables about customer spending behavior using semantic meaning"
+    expectedTools:
+      - semantic_search
+    forbiddenTools: []
+    goldAnswerContains:
+      - "semantic_search"
+    maxToolCalls: 2
+
+  - id: semantic-concept-search
+    prompt: "I need conceptually related assets for revenue forecasting, use vector search"
+    expectedTools:
+      - semantic_search
+    forbiddenTools: []
+    goldAnswerContains:
+      - "semantic_search"
+    maxToolCalls: 2
+
+  - id: search-vs-semantic-chooses-keyword
+    prompt: "Search for tables with column SKU in BigQuery"
+    expectedTools:
+      - search_metadata
+    forbiddenTools: []
+    goldAnswerContains:
+      - "search_metadata"
+    maxToolCalls: 2
+
+  # ── Entity Chaining (search → get_entity_details) ──
+  - id: entity-chain-search-then-details
+    prompt: "Find the table orders_fact and then get its full details"
+    expectedTools:
+      - search_metadata
+      - get_entity_details
+    forbiddenTools: []
+    goldAnswerContains:
+      - "search_metadata"
+      - "get_entity_details"
+    maxToolCalls: 3
+
+  - id: entity-direct-lookup
+    prompt: "Read details about table postgres.mydb.myschema.orders"
+    expectedTools:
+      - get_entity_details
+    forbiddenTools: []
+    goldAnswerContains:
+      - "get_entity_details"
+    maxToolCalls: 2
+
+  # ── Lineage Directionality ──
+  - id: lineage-both-directions
+    prompt: "Show me the lineage and dependencies of the orders table both upstream and downstream"
+    expectedTools:
+      - get_entity_lineage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "get_entity_lineage"
+    maxToolCalls: 2
+
+  - id: lineage-upstream-only
+    prompt: "What are the upstream sources that feed into the orders table?"
+    expectedTools:
+      - get_entity_lineage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "get_entity_lineage"
+    maxToolCalls: 2
+
+  - id: lineage-downstream-only
+    prompt: "What downstream assets depend on the orders table?"
+    expectedTools:
+      - get_entity_lineage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "get_entity_lineage"
+    maxToolCalls: 2
+
+  # ── Root Cause Analysis ──
+  - id: rca-basic
+    prompt: "Why is the orders_fact table failing? Find the root cause upstream"
+    expectedTools:
+      - root_cause_analysis
+    forbiddenTools: []
+    goldAnswerContains:
+      - "root_cause_analysis"
+    maxToolCalls: 2
+
+  - id: rca-narrative-quality
+    prompt: "Perform root cause analysis on the payments table to find upstream failures"
+    expectedTools:
+      - root_cause_analysis
+    forbiddenTools: []
+    goldAnswerContains:
+      - "root_cause_analysis"
+    maxToolCalls: 2
+
+  # ── Change Impact ──
+  - id: impact-drop-column
+    prompt: "What breaks if we drop the customer_id column from orders? Show me the change impact"
+    expectedTools:
+      - change_impact
+    forbiddenTools: []
+    goldAnswerContains:
+      - "change_impact"
+      - "dashboards"
+      - "customer_id"
+    maxToolCalls: 2
+
+  - id: impact-change-type
+    prompt: "Analyze the change impact of changing the id column type from int to bigint on the users table"
+    expectedTools:
+      - change_impact
+    forbiddenTools: []
+    goldAnswerContains:
+      - "change_impact"
+    maxToolCalls: 2
+
+  - id: impact-deprecate-entity
+    prompt: "What is the impact of deprecating the legacy_orders table? I need a change impact analysis"
+    expectedTools:
+      - change_impact
+    forbiddenTools: []
+    goldAnswerContains:
+      - "change_impact"
+    maxToolCalls: 2
+
+  # ── Incident Timeline ──
+  - id: incident-basic
+    prompt: "Walk me through the incident timeline for the orders_fact table"
+    expectedTools:
+      - incident_timeline
+    forbiddenTools: []
+    goldAnswerContains:
+      - "incident_timeline"
+    maxToolCalls: 2
+
+  - id: incident-with-lookback
+    prompt: "Build an incident timeline for the payments table with 48 hours lookback"
+    expectedTools:
+      - incident_timeline
+    forbiddenTools: []
+    goldAnswerContains:
+      - "incident_timeline"
+    maxToolCalls: 2
+
+  # ── Dry-run / Safety ──
+  - id: patch-with-preview
+    prompt: "Modify the description of the orders table using patch_entity"
+    expectedTools:
+      - patch_entity
+    forbiddenTools: []
+    goldAnswerContains:
+      - "patch_entity"
+    maxToolCalls: 2
+
+  - id: no-mutation-for-read
+    prompt: "I want to see the details of the orders table without changing anything"
+    expectedTools:
+      - get_entity_details
+    forbiddenTools:
+      - patch_entity
+    goldAnswerContains:
+      - "get_entity_details"
+    maxToolCalls: 2
+
+  # ── Governance ──
+  - id: glossary-create
+    prompt: "Create a new glossary for Marketing terms"
+    expectedTools:
+      - create_glossary
+    forbiddenTools: []
+    goldAnswerContains:
+      - "create_glossary"
+    maxToolCalls: 2
+
+  - id: glossary-term-create
+    prompt: "Create a glossary term 'Revenue' in the Finance glossary"
+    expectedTools:
+      - create_glossary_term
+    forbiddenTools: []
+    goldAnswerContains:
+      - "create_glossary_term"
+    maxToolCalls: 2
+
+  # ── Test Authoring ──
+  - id: test-definitions-lookup
+    prompt: "What test definitions are available for table-level tests?"
+    expectedTools:
+      - get_test_definitions
+    forbiddenTools: []
+    goldAnswerContains:
+      - "get_test_definitions"
+    maxToolCalls: 2
+
+  - id: create-test-case
+    prompt: "Add a test case for column values to be not null on the orders table id column"
+    expectedTools:
+      - create_test_case
+    forbiddenTools: []
+    goldAnswerContains:
+      - "create_test_case"
+    maxToolCalls: 3
+
+  # ── Metrics ──
+  - id: create-metric
+    prompt: "Create a metric for daily revenue using SQL"
+    expectedTools:
+      - create_metric
+    forbiddenTools: []
+    goldAnswerContains:
+      - "create_metric"
+    maxToolCalls: 2
+
+  # ── Multi-step Workflow ──
+  - id: full-rca-then-incident
+    prompt: "First find the root cause of failures on orders_fact, then build an incident timeline for it"
+    expectedTools:
+      - root_cause_analysis
+      - incident_timeline
+    forbiddenTools: []
+    goldAnswerContains:
+      - "root_cause_analysis"
+      - "incident_timeline"
+    maxToolCalls: 4
+
+  - id: search-lineage-chain
+    prompt: "Search for the orders table, then check its lineage dependencies"
+    expectedTools:
+      - search_metadata
+      - get_entity_lineage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "search_metadata"
+      - "get_entity_lineage"
+    maxToolCalls: 3
+
+  # ── Stewardship Copilot (E5) ──
+  - id: stewardship-find-unowned
+    prompt: "Find tables that have no owners assigned"
+    expectedTools:
+      - find_unowned_assets
+    forbiddenTools: []
+    goldAnswerContains:
+      - "find_unowned_assets"
+    maxToolCalls: 2
+
+  - id: stewardship-find-unowned-in-domain
+    prompt: "Find unowned assets in the Marketing domain"
+    expectedTools:
+      - find_unowned_assets
+    forbiddenTools: []
+    goldAnswerContains:
+      - "find_unowned_assets"
+    maxToolCalls: 2
+
+  - id: stewardship-suggest-owner
+    prompt: "Suggest the best owner for the unowned table postgres.mydb.myschema.orders"
+    expectedTools:
+      - suggest_owner_for
+    forbiddenTools: []
+    goldAnswerContains:
+      - "suggest_owner_for"
+    maxToolCalls: 2
+
+  - id: stewardship-draft-patch
+    prompt: "Draft an ownership patch to assign jane.doe as owner of the orders table"
+    expectedTools:
+      - draft_ownership_patch
+    forbiddenTools: []
+    goldAnswerContains:
+      - "draft_ownership_patch"
+    maxToolCalls: 2
+
+  - id: stewardship-full-workflow
+    prompt: "Find unowned tables, suggest an owner for the highest impact one, then draft the ownership patch"
+    expectedTools:
+      - find_unowned_assets
+      - suggest_owner_for
+      - draft_ownership_patch
+    forbiddenTools: []
+    goldAnswerContains:
+      - "find_unowned_assets"
+      - "suggest_owner_for"
+      - "draft_ownership_patch"
+    maxToolCalls: 4
+
+  - id: stewardship-draft-should-not-apply
+    prompt: "Draft an ownership patch for the orders table but do not apply it"
+    expectedTools:
+      - draft_ownership_patch
+    forbiddenTools:
+      - patch_entity
+    goldAnswerContains:
+      - "draft_ownership_patch"
+    maxToolCalls: 2
+
+  # ── Prompt Selection (MCP Prompts) ──
+  - id: prompt-ownership-stewardship-workflow
+    prompt: "Guide me through the ownership stewardship workflow to assign owners to unowned assets"
+    expectedTools:
+      - find_unowned_assets
+      - draft_ownership_patch
+    forbiddenTools: []
+    expectedPrompts:
+      - ownership_stewardship
+    forbiddenPrompts: []
+    goldAnswerContains:
+      - "ownership_stewardship"
+    maxToolCalls: 3
+
+  - id: prompt-ownership-review
+    prompt: "I need to do an ownership review of all tables without owners"
+    expectedTools:
+      - find_unowned_assets
+    forbiddenTools: []
+    expectedPrompts:
+      - ownership_stewardship
+    forbiddenPrompts: []
+    goldAnswerContains:
+      - "ownership_stewardship"
+    maxToolCalls: 3
+
+  - id: prompt-governance-gap
+    prompt: "Help me close the governance gap by assigning owners to data assets"
+    expectedTools:
+      - draft_ownership_patch
+    forbiddenTools: []
+    expectedPrompts:
+      - ownership_stewardship
+    forbiddenPrompts: []
+    goldAnswerContains:
+      - "ownership_stewardship"
+    maxToolCalls: 3
+
+  - id: prompt-assign-owners-workflow
+    prompt: "I want to assign owners to all unowned tables using the stewardship workflow"
+    expectedTools:
+      - find_unowned_assets
+      - draft_ownership_patch
+    forbiddenTools: []
+    expectedPrompts:
+      - ownership_stewardship
+    forbiddenPrompts: []
+    goldAnswerContains:
+      - "ownership_stewardship"
+    maxToolCalls: 3
+
+  - id: prompt-ownership-stewardship-also-selects-tools
+    prompt: "Walk me through the ownership stewardship workflow for unowned tables in the Sales domain"
+    expectedTools:
+      - find_unowned_assets
+    forbiddenTools: []
+    expectedPrompts:
+      - ownership_stewardship
+    forbiddenPrompts: []
+    goldAnswerContains:
+      - "ownership_stewardship"
+    maxToolCalls: 3
+
+  - id: prompt-search-assistant
+    prompt: "I need a search assistant to help me find datasets"
+    expectedTools:
+      - search_metadata
+    forbiddenTools: []
+    expectedPrompts:
+      - search_metadata
+    forbiddenPrompts: []
+    goldAnswerContains:
+      - "search_metadata"
+    maxToolCalls: 2
+
+  # ── Governance Coverage Scanner (E6) ──
+  - id: governance-coverage-basic
+    prompt: "Show me the governance coverage report for my tables"
+    expectedTools:
+      - scan_governance_coverage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "scan_governance_coverage"
+    maxToolCalls: 2
+
+  - id: governance-coverage-compliance
+    prompt: "What is the compliance coverage for data assets in the Finance domain?"
+    expectedTools:
+      - scan_governance_coverage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "scan_governance_coverage"
+    maxToolCalls: 2
+
+  - id: governance-coverage-pii
+    prompt: "Run a PII scan to find untagged PII candidate columns"
+    expectedTools:
+      - scan_governance_coverage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "scan_governance_coverage"
+    maxToolCalls: 2
+
+  - id: governance-coverage-gap-report
+    prompt: "Give me a governance gap report showing which attributes are missing on tables"
+    expectedTools:
+      - scan_governance_coverage
+    forbiddenTools: []
+    goldAnswerContains:
+      - "scan_governance_coverage"
+    maxToolCalls: 2
+
+  - id: governance-coverage-then-stewardship
+    prompt: "Show me the governance coverage for tables, then help me find unowned assets to close the gap"
+    expectedTools:
+      - scan_governance_coverage
+      - find_unowned_assets
+    forbiddenTools: []
+    goldAnswerContains:
+      - "scan_governance_coverage"
+      - "find_unowned_assets"
+    maxToolCalls: 3
+
+  # ── Group E9: validate_patch fixtures ──
+
+  - id: validate-patch-preview
+    prompt: "Preview the effect of adding an owner to the orders table before applying it"
+    expectedTools:
+      - validate_patch
+    forbiddenTools:
+      - patch_entity
+    goldAnswerContains:
+      - "validate_patch"
+    maxToolCalls: 2
+
+  - id: validate-patch-dry-run
+    prompt: "Dry-run this JSON patch on the customer table and show me what would change"
+    expectedTools:
+      - validate_patch
+    forbiddenTools:
+      - patch_entity
+    goldAnswerContains:
+      - "validate_patch"
+    maxToolCalls: 2
+
+  - id: validate-patch-then-apply
+    prompt: "Validate the ownership patch for db.sales.orders, then if it looks good, apply it"
+    expectedTools:
+      - validate_patch
+      - patch_entity
+    forbiddenTools: []
+    goldAnswerContains:
+      - "validate_patch"
+      - "patch_entity"
+    maxToolCalls: 3
+
+  - id: validate-patch-risky-change
+    prompt: "Check what happens if I remove all owners from the finance transactions table"
+    expectedTools:
+      - validate_patch
+    forbiddenTools:
+      - patch_entity
+    goldAnswerContains:
+      - "validate_patch"
+      - "ownerRemoval"
+    maxToolCalls: 2
+
+  # ── Group E7: Data Contract Round-trip fixtures ──
+
+  - id: data-contract-export
+    prompt: "Export the data contract for the orders table"
+    expectedTools:
+      - generate_data_contract
+    forbiddenTools: []
+    goldAnswerContains:
+      - "generate_data_contract"
+    maxToolCalls: 2
+
+  - id: data-contract-export-and-reapply
+    prompt: "Export and re-apply the orders table data contract"
+    expectedTools:
+      - generate_data_contract
+      - apply_data_contract
+    forbiddenTools: []
+    goldAnswerContains:
+      - "generate_data_contract"
+      - "apply_data_contract"
+    maxToolCalls: 3
+
+  - id: data-contract-dry-run-apply
+    prompt: "Preview what changes would happen if I apply this data contract YAML to the customer table"
+    expectedTools:
+      - apply_data_contract
+    forbiddenTools:
+      - patch_entity
+    goldAnswerContains:
+      - "apply_data_contract"
+    maxToolCalls: 2
+
+  - id: data-contract-apply-with-creation
+    prompt: "Apply this data contract to create the missing orders_staging table"
+    expectedTools:
+      - apply_data_contract
+    forbiddenTools: []
+    goldAnswerContains:
+      - "apply_data_contract"
+    maxToolCalls: 2
+
+  # ── Group E8: SQL → Lineage fixtures ──
+
+  - id: lineage-from-sql-plan
+    prompt: "Extract lineage from this SQL: INSERT INTO summary SELECT * FROM orders JOIN customers ON orders.cust_id = customers.id"
+    expectedTools:
+      - lineage_from_sql
+    forbiddenTools: []
+    goldAnswerContains:
+      - "lineage_from_sql"
+    maxToolCalls: 2
+
+  - id: lineage-from-sql-apply
+    prompt: "Parse this SQL and create the lineage edges: CREATE TABLE summary AS SELECT * FROM raw_data"
+    expectedTools:
+      - lineage_from_sql
+    forbiddenTools: []
+    goldAnswerContains:
+      - "lineage_from_sql"
+    maxToolCalls: 2
+
+  - id: lineage-from-sql-preview-only
+    prompt: "What tables does this SQL reference? SELECT * FROM myschema.orders"
+    expectedTools:
+      - lineage_from_sql
+    forbiddenTools:
+      - create_lineage
+    goldAnswerContains:
+      - "lineage_from_sql"
+    maxToolCalls: 2
+
+  - id: lineage-from-sql-cte
+    prompt: "Extract lineage from this SQL with CTE: WITH filtered AS (SELECT * FROM raw_data WHERE active = 1) INSERT INTO target SELECT * FROM filtered"
+    expectedTools:
+      - lineage_from_sql
+    forbiddenTools: []
+    goldAnswerContains:
+      - "lineage_from_sql"
+    maxToolCalls: 2
+
+  # ── Group E10: Cost × Freshness Ranking fixtures ──
+
+  - id: cost-ranking-wasting-money
+    prompt: "Which tables are wasting money? Rank assets by cost and freshness to find expensive stale tables"
+    expectedTools:
+      - rank_assets_by_cost
+    forbiddenTools: []
+    goldAnswerContains:
+      - "rank_assets_by_cost"
+    maxToolCalls: 2
+
+  - id: cost-ranking-by-domain
+    prompt: "Show me the cost freshness ranking for tables in the Marketing domain"
+    expectedTools:
+      - rank_assets_by_cost
+    forbiddenTools: []
+    goldAnswerContains:
+      - "rank_assets_by_cost"
+    maxToolCalls: 2
+
+  - id: cost-ranking-stale-tables
+    prompt: "Find the most expensive stale tables that haven't been updated in 30 days using cost ranking"
+    expectedTools:
+      - rank_assets_by_cost
+    forbiddenTools: []
+    goldAnswerContains:
+      - "rank_assets_by_cost"
+    maxToolCalls: 2
+
+  - id: cost-ranking-then-stewardship
+    prompt: "Rank assets by cost freshness, then find unowned assets among the expensive ones"
+    expectedTools:
+      - rank_assets_by_cost
+      - find_unowned_assets
+    forbiddenTools: []
+    goldAnswerContains:
+      - "rank_assets_by_cost"
+      - "find_unowned_assets"
+    maxToolCalls: 3
+
+  # ── Group E11: Agentic Test Author fixtures ──
+
+  - id: suggest-tests-for-table
+    prompt: "Suggest test cases for the orders table based on its schema and constraints"
+    expectedTools:
+      - suggest_test_cases
+    forbiddenTools: []
+    goldAnswerContains:
+      - "suggest_test_cases"
+    maxToolCalls: 2
+
+  - id: suggest-tests-new-table
+    prompt: "What tests should I add to this new table? Propose test case recommendations"
+    expectedTools:
+      - suggest_test_cases
+    forbiddenTools: []
+    goldAnswerContains:
+      - "suggest_test_cases"
+    maxToolCalls: 2
+
+  - id: suggest-tests-then-create
+    prompt: "Suggest test cases for the customer table, then create test cases for the recommendations"
+    expectedTools:
+      - suggest_test_cases
+      - create_test_case
+    forbiddenTools: []
+    goldAnswerContains:
+      - "suggest_test_cases"
+      - "create_test_case"
+    maxToolCalls: 4

@@ -61,6 +61,12 @@
             "query": "tables with customer data"
           },
           {
+            "description": "Search with pagination (envelope response includes pagination block)",
+            "query": "tables",
+            "size": 10,
+            "from": 0
+          },
+          {
             "description": "Simple search - Find tier1 tables",
             "query": "tier1 tables",
             "entityType": "table"
@@ -69,12 +75,6 @@
             "description": "Simple search - Find dashboards",
             "query": "sales dashboards",
             "entityType": "dashboard"
-          },
-          {
-            "description": "Simple search with pagination",
-            "query": "tables",
-            "size": 20,
-            "from": 0
           },
           {
             "description": "Advanced - Owner filter with OpenSearch",
@@ -101,7 +101,7 @@
     },
     {
       "name": "semantic_search",
-      "description": "Meaning-based discovery of data assets using vector embeddings. Best for exploratory or vague queries where you don't know exact names — it finds conceptually related assets even when no keywords match. Use this when the user describes what data they need in plain language (e.g., 'tables about customer spending behavior', 'anything related to revenue forecasting'). Returns entity summaries with name, columns, description, and metadata. Choose this over search_metadata when the query is about meaning or concepts rather than specific identifiers or attributes. Results include 'fullyQualifiedName' and 'entityType' — pass these directly to get_entity_details for full entity information.",
+      "description": "Meaning-based discovery of data assets using vector embeddings. Best for exploratory or vague queries where you don't know exact names — it finds conceptually related assets even when no keywords match. Use this when the user describes what data they need in plain language (e.g., 'tables about customer spending behavior', 'anything related to revenue forecasting'). Returns entity summaries in a structured envelope with pagination and warnings (e.g. ignored filters). Results include 'fullyQualifiedName' and 'entityType' — pass these directly to get_entity_details for full entity information. Choose this over search_metadata when the query is about meaning or concepts rather than specific identifiers or attributes.",
       "parameters": {
         "description": "Use 'query' to describe what you're looking for in plain language. The system finds conceptually similar assets using vector similarity. Optionally filter by entity type, service, or tags.",
         "type": "object",
@@ -124,6 +124,11 @@
             "type": "integer",
             "description": "Number of parent entities to return. Default is 10, maximum is 50.",
             "default": 10
+          },
+          "from": {
+            "type": "integer",
+            "description": "Offset for pagination. Default is 0. Use with 'size' to page through results.",
+            "default": 0
           },
           "k": {
             "type": "integer",
@@ -162,23 +167,57 @@
     },
     {
       "name": "get_entity_details",
-      "description": "Get detailed information about a specific entity by its fully qualified name. IMPORTANT: Use the 'fullyQualifiedName' and 'entityType' values directly from search_metadata or semantic_search results — do not construct the FQN manually. Response is optimized for LLM context by excluding verbose metadata fields.",
+      "description": "Reads detailed information about a specific entity. This is a read-only operation. Supports multiple identification forms: fully qualified name (preferred), entity UUID, entity link (<#E::type::fqn>), or name+service combination. Response is optimized for LLM context by excluding verbose metadata fields. IMPORTANT: Use the 'fullyQualifiedName' and 'entityType' values directly from search_metadata or semantic_search results — do not construct the FQN manually.",
       "parameters": {
-        "description": "Use 'fullyQualifiedName' and 'entityType' from search results directly.",
+        "description": "Use 'fullyQualifiedName' and 'entityType' from search results directly. Also supports id, entityLink, or name+service for flexible entity lookup.",
         "type": "object",
         "properties": {
           "entityType": {
             "type": "string",
-            "description": "Type of entity (e.g., table, dashboard, topic, pipeline). Use the 'entityType' value from search results."
+            "description": "Type of entity (e.g., table, dashboard, topic, pipeline). Use the 'entityType' value from search results. Required for all lookup forms."
           },
           "fqn": {
             "type": "string",
             "description": "Fully qualified name of the entity. IMPORTANT: Use the exact 'fullyQualifiedName' value from search_metadata or semantic_search results. Do not attempt to construct or modify the FQN."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search_metadata or semantic_search directly — the tool resolves it automatically. If both 'fqn' and 'fullyQualifiedName' are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Use when you have the entity ID from a previous response or URL. The tool will look up the entity by ID."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Example: <#E::table::postgres.mydb.myschema.mytable>. The tool parses the link and resolves the entity."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity (not fully qualified). Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN. Example: for a table, provide name, service, database, and schema."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter. Example: 'postgres'."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service' for table/schema entities. Example: 'mydb'."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database' for table entities. Example: 'myschema'."
           }
         },
         "required": [
-          "entityType",
-          "fqn"
+          "entityType"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
         ]
       }
     },
@@ -269,7 +308,7 @@
     },
     {
       "name": "patch_entity",
-      "description": "Patches an Entity based on a JSONPatch. Beforehand the Entity should be validated by finding it and creating a proper patch. IMPORTANT field naming rules: all array/list fields use PLURAL names in the JSON body — use 'domains' (not 'domain'), 'owners' (not 'owner'), 'tags' (not 'tag'), 'reviewers' (not 'reviewer'). Domain values must be entity reference objects: {\"id\": \"<uuid>\", \"type\": \"domain\"}. Owner values must be entity reference objects: {\"id\": \"<uuid>\", \"type\": \"user\" or \"team\"}. To add a domain: [{\"op\": \"add\", \"path\": \"/domains/0\", \"value\": {\"id\": \"<domain-id>\", \"type\": \"domain\", \"name\": \"<domain-name>\"}}]. To replace description: [{\"op\": \"add\", \"path\": \"/description\", \"value\": \"new description\"}]. Always look up entity UUIDs using search or get tools before patching.",
+      "description": "Modifies an entity using JSONPatch operations. Requires edit permissions or ownership of the entity. Beforehand the Entity should be validated by finding it and creating a proper patch. IMPORTANT field naming rules: all array/list fields use PLURAL names in the JSON body — use 'domains' (not 'domain'), 'owners' (not 'owner'), 'tags' (not 'tag'), 'reviewers' (not 'reviewer'). Domain values must be entity reference objects: {\"id\": \"<uuid>\", \"type\": \"domain\"}. Owner values must be entity reference objects: {\"id\": \"<uuid>\", \"type\": \"user\" or \"team\"}. To add a domain: [{\"op\": \"add\", \"path\": \"/domains/0\", \"value\": {\"id\": \"<domain-id>\", \"type\": \"domain\", \"name\": \"<domain-name>\"}}]. To replace description: [{\"op\": \"add\", \"path\": \"/description\", \"value\": \"new description\"}]. Always look up entity UUIDs using search or get tools before patching.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -281,6 +320,34 @@
             "type": "string",
             "description": "Fully Qualified Name of the Entity to be patched."
           },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity to patch. Alternative to fqn/fullyQualifiedName for entity identification."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Alternative identification form."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity. Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service' for table/schema entities."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database' for table entities."
+          },
           "patch": {
             "type": "string",
             "description": "JSONPatch operations as a JSON array string. Each operation has 'op' (add/remove/replace), 'path' (JSON Pointer starting with /), and 'value'. Field paths MUST use plural names for array fields: /domains, /owners, /tags, /reviewers. Example to set a domain: [{\"op\": \"add\", \"path\": \"/domains/0\", \"value\": {\"id\": \"<domain-uuid>\", \"type\": \"domain\", \"name\": \"<domain-name>\"}}]."
@@ -288,40 +355,80 @@
         },
         "required": [
           "entityType",
-          "fqn",
           "patch"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
         ]
       }
     },
     {
       "name": "get_entity_lineage",
-      "description": "Get detailed information about lineage (upstream/downstream dependencies) of a specific entity. Use this for root cause (upstream entities) or impact (downstream entities) analysis and explaining dependencies between entities.",
+      "description": "Get detailed information about lineage (upstream/downstream dependencies) of a specific entity. Supports multiple identification forms: fully qualified name (preferred), entity UUID, entity link (<#E::type::fqn>), or name+service combination. Use this for root cause (upstream entities) or impact (downstream entities) analysis and explaining dependencies between entities.",
       "parameters": {
-        "description": "Fqn is the fully qualified name of the entity. Entity type could be table, topic etc.",
+        "description": "Identify the entity using fqn, fullyQualifiedName, id, entityLink, or name+service. Entity type is required.",
         "type": "object",
         "properties": {
           "entityType": {
             "type": "string",
-            "description": "Type of entity"
+            "description": "Type of entity (e.g., table, topic, pipeline). Required for all lookup forms."
           },
           "fqn": {
             "type": "string",
-            "description": "Fully qualified name of the entity"
+            "description": "Fully qualified name of the entity."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Use when you have the entity ID from a previous response or URL."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Example: <#E::table::postgres.mydb.myschema.mytable>."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity (not fully qualified). Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service' for table/schema entities."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database' for table entities."
           },
           "upstreamDepth": {
             "type": "integer",
-            "description": "Number of upstream hops to traverse. Default is 3, maximum is 10 to prevent excessive response size.",
+            "description": "Number of upstream hops to traverse. Default is 3, maximum is 10. Set to 0 to disable upstream traversal (downstream-only query).",
             "default": 3
           },
           "downstreamDepth": {
             "type": "integer",
-            "description": "Number of downstream hops to traverse. Default is 3, maximum is 10 to prevent excessive response size.",
+            "description": "Number of downstream hops to traverse. Default is 3, maximum is 10. Set to 0 to disable downstream traversal (upstream-only query).",
             "default": 3
           }
         },
         "required": [
-          "entityType",
-          "fqn"
+          "entityType"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
         ]
       }
     },
@@ -400,9 +507,9 @@
     },
     {
       "name": "create_test_case",
-      "description": "This tool can be used to create a test case for a table or a table's column. It needs test definitions. These test definition can be found using the get_test_definitions tool. If this fails do not do other operations.",
+      "description": "This tool can be used to create a test case for a table or a table's column. It needs test definitions. These test definition can be found using the get_test_definitions tool. Supports multiple entity identification forms: fully qualified name (preferred), entity UUID, entity link (<#E::type::fqn>), or name+service combination. If this fails do not do other operations.",
       "parameters": {
-        "description": "This tool can be used to create a test case for a table or a table's column. It requires the test definition and the entity (table or column) to be tested.",
+        "description": "Identify the entity using fqn, fullyQualifiedName, id, entityLink, or name+service. Requires the test definition and the entity (table or column) to be tested.",
         "type": "object",
         "properties": {
           "name": {
@@ -412,6 +519,18 @@
           "fqn": {
             "type": "string",
             "description": "Fully qualified name of the table for which the test case is being added. Always use the table FQN, not the column FQN."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Use when you have the entity ID from a previous response."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Example: <#E::table::postgres.mydb.myschema.mytable>."
           },
           "columnName": {
             "type": "string",
@@ -454,9 +573,14 @@
         },
         "required": [
           "name",
-          "fqn",
           "testDefinitionName",
           "parameterValues"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]}
         ]
       }
     },
@@ -546,28 +670,533 @@
       }
     },
     {
+      "name": "change_impact",
+      "description": "Analyzes the downstream impact of a proposed change to a data asset. Answers 'what breaks if I change X?' in one call by composing lineage traversal, dashboard/pipeline search, test case discovery, and policy attachment. Returns severity (critical/high/medium/low), affected asset lists, counts, and a Markdown narrative. This is a read-only analysis tool — it does not modify any entities.",
+      "parameters": {
+        "description": "Identify the entity using fqn, fullyQualifiedName, id, entityLink, or name+service. Specify the proposed change kind and details.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity (e.g., table, dashboard, topic, pipeline). Default is 'table'. Required for all lookup forms."
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the entity to analyze."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Alternative to fqn/fullyQualifiedName for entity identification."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Alternative identification form."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity. Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service'."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database'."
+          },
+          "proposedChange": {
+            "type": "object",
+            "description": "Describes the proposed change. Required. Supported kinds: 'dropColumn' (requires column), 'changeColumnType' (requires column, fromType, toType), 'deprecateEntity', 'custom' (requires description). Example: {\"kind\": \"dropColumn\", \"column\": \"customer_id\"}",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "description": "Type of proposed change. One of: dropColumn, changeColumnType, deprecateEntity, custom.",
+                "enum": ["dropColumn", "changeColumnType", "deprecateEntity", "custom"]
+              },
+              "column": {
+                "type": "string",
+                "description": "Column name affected by the change. Required for dropColumn and changeColumnType kinds."
+              },
+              "fromType": {
+                "type": "string",
+                "description": "Current data type of the column. Required for changeColumnType kind."
+              },
+              "toType": {
+                "type": "string",
+                "description": "New data type for the column. Required for changeColumnType kind."
+              },
+              "description": {
+                "type": "string",
+                "description": "Free-text description of the change. Required for custom kind."
+              }
+            },
+            "required": ["kind"]
+          },
+          "downstreamDepth": {
+            "type": "integer",
+            "description": "Number of downstream hops to traverse for impact analysis. Default is 3, maximum is 10. Higher values give broader impact visibility but take longer.",
+            "default": 3
+          },
+          "includeDashboards": {
+            "type": "boolean",
+            "description": "Whether to include dashboards and pipelines that reference the affected entity/column. Default is true.",
+            "default": true
+          },
+          "includeTests": {
+            "type": "boolean",
+            "description": "Whether to include test cases that touch the affected entity/column. Default is true.",
+            "default": true
+          },
+          "includePolicies": {
+            "type": "boolean",
+            "description": "Whether to include policies attached to the affected entity/domain. Default is true.",
+            "default": true
+          }
+        },
+        "required": ["proposedChange"],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ]
+      }
+    },
+    {
+      "name": "incident_timeline",
+      "description": "Builds a chronological incident timeline for a data asset, composing root cause analysis, ChangeEvent feed, test case result history, and ownership resolution into a Slack/PagerDuty-ready Markdown narrative. Answers 'what happened and who owns it?' in one call. Returns a timeline of events (upstream failures, schema changes, test failures/recoveries), root cause, suggested owners, and an optional Markdown narrative. This is a read-only analysis tool — it does not modify any entities.",
+      "parameters": {
+        "description": "Identify the entity using fqn, fullyQualifiedName, id, entityLink, or name+service. Optionally specify lookback window and output format.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity (e.g., table, dashboard, topic, pipeline). Default is 'table'. Required for all lookup forms."
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the entity."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Alternative to fqn/fullyQualifiedName for entity identification."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Alternative identification form."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity. Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service'."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database'."
+          },
+          "lookbackHours": {
+            "type": "integer",
+            "description": "Lookback window in hours for event retrieval. Default is 72 (3 days), maximum is 720 (30 days).",
+            "default": 72
+          },
+          "format": {
+            "type": "string",
+            "description": "Output format for the narrative. 'markdown' produces a Markdown narrative (default). 'json' omits the narrative and returns structured data only.",
+            "enum": ["markdown", "json"],
+            "default": "markdown"
+          }
+        },
+        "required": [
+          "entityType"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ]
+      }
+    },
+    {
+      "name": "find_unowned_assets",
+      "description": "Finds data assets without owners, ranked by downstream impact. Use this to identify governance gaps and prioritize ownership assignment. Returns a prioritized list where assets with more downstream dependencies rank higher (higher impact if unowned). Supports optional scope filtering by domain or service. After reviewing the list, use `suggest_owner_for` to identify the best owner candidate for each unowned asset, then `draft_ownership_patch` to prepare the ownership assignment for review. This is a read-only tool — it does not modify any entities.",
+      "parameters": {
+        "description": "Optionally filter by scope (domain/service) and entity type. Default finds unowned tables.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity to search for unowned assets. Default is 'table'.",
+            "default": "table"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Domain name to scope the search (shorthand for domain scope)."
+              },
+              {
+                "type": "object",
+                "description": "Scope filter with explicit type and value.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Scope type: 'domain' or 'service'.",
+                    "enum": ["domain", "service"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Scope value (e.g., 'Marketing' domain or 'BigQuery' service)."
+                  }
+                },
+                "required": ["type", "value"]
+              }
+            ],
+            "description": "Optional scope filter. Pass a domain name string (shorthand) or {type, value} object."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of unowned assets to return. Default is 25, maximum is 200.",
+            "default": 25
+          }
+        },
+        "required": [],
+        "examples": [
+          {
+            "description": "Find unowned tables across the catalog",
+            "entityType": "table"
+          },
+          {
+            "description": "Find unowned tables in the Marketing domain",
+            "entityType": "table",
+            "scope": "Marketing"
+          },
+          {
+            "description": "Find unowned dashboards in BigQuery service",
+            "entityType": "dashboard",
+            "scope": {"type": "service", "value": "BigQuery"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "suggest_owner_for",
+      "description": "Suggests the best owner candidates for a specific unowned data asset. Uses weighted scoring: 3× most frequent recent patcher (last 90 days), 2× owners of upstream entities, 1× domain default owner, 1× owners of sibling tables in the same schema. Returns top-3 candidates with scores and rationale. After choosing a candidate, use `draft_ownership_patch` to generate a review-ready JSONPatch. This is a read-only tool — it does not modify any entities.",
+      "parameters": {
+        "description": "Identify the entity using fqn, fullyQualifiedName, id, entityLink, or name+service.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity (e.g., table, dashboard). Default is 'table'.",
+            "default": "table"
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the entity."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity. Must be combined with 'service'."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction."
+          }
+        },
+        "required": [
+          "entityType"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ],
+        "examples": [
+          {
+            "description": "Suggest owner for a specific table",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.orders"
+          },
+          {
+            "description": "Suggest owner using fullyQualifiedName from search results",
+            "entityType": "table",
+            "fullyQualifiedName": "bigquery.project.dataset.customers"
+          }
+        ]
+      }
+    },
+    {
+      "name": "draft_ownership_patch",
+      "description": "Drafts a JSONPatch for assigning ownership to an entity. Returns the patch for human or agent review — does NOT apply it. The consumer must explicitly call `patch_entity` to apply. Supports 'add' mode (append owner to existing) and 'replace' mode (overwrite all owners). Use this after `suggest_owner_for` identifies the best candidate. This is a safe, non-mutating tool.",
+      "parameters": {
+        "description": "Identify the entity and specify the owner to assign. The owner can be a user or team.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity. Default is 'table'.",
+            "default": "table"
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the entity."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity. Must be combined with 'service'."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction."
+          },
+          "owner": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Owner name (assumed to be a user)."
+              },
+              {
+                "type": "object",
+                "description": "Owner specification with name, type, and optional id.",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the user or team to assign as owner."
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "Owner type: 'user' or 'team'. Default is 'user'.",
+                    "default": "user",
+                    "enum": ["user", "team"]
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "UUID of the owner entity. If not provided, the tool will resolve by name."
+                  }
+                },
+                "required": ["name"]
+              }
+            ],
+            "description": "Owner to assign. Provide a name string (shorthand for user) or {name, type?, id?} object."
+          },
+          "mode": {
+            "type": "string",
+            "description": "Patch mode. 'add' appends the owner to existing owners (default). 'replace' overwrites all existing owners — use with caution.",
+            "default": "add",
+            "enum": ["add", "replace"]
+          }
+        },
+        "required": [
+          "entityType",
+          "owner"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ],
+        "examples": [
+          {
+            "description": "Draft patch to add a user as owner",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.orders",
+            "owner": "jane.doe"
+          },
+          {
+            "description": "Draft patch to add a team as owner",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.orders",
+            "owner": {"name": "DataPlatform", "type": "team"},
+            "mode": "add"
+          },
+          {
+            "description": "Draft patch to replace all owners",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.orders",
+            "owner": {"name": "jane.doe", "type": "user"},
+            "mode": "replace"
+          }
+        ]
+      }
+    },
+    {
+      "name": "scan_governance_coverage",
+      "description": "Reports what percentage of data assets have key governance attributes populated (owner, tier, domain, description, PII tags). Use this to identify governance gaps and prioritize remediation. Returns coverage percentages per attribute, gap details with top-offending entities, and PII candidate detection (columns matching PII name patterns that lack PII tags). Supports optional scope filtering by domain or service. After reviewing the report, use `find_unowned_assets` to prioritize ownership assignment, `suggest_owner_for` to identify owners, and `draft_ownership_patch` to prepare ownership patches. For PII candidates, use `patch_entity` to apply PII tags. This is a read-only tool — it does not modify any entities.",
+      "parameters": {
+        "description": "Optionally filter by scope (domain/service) and entity type. Default scans tables.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity to scan for governance coverage. Default is 'table'. Other options: 'dashboard', 'topic', 'pipeline', 'mlmodel', 'container'.",
+            "default": "table"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Domain name to scope the scan (shorthand for domain scope)."
+              },
+              {
+                "type": "object",
+                "description": "Scope filter with explicit type and value.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Scope type: 'domain' or 'service'.",
+                    "enum": ["domain", "service"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Scope value (e.g., 'Marketing' domain or 'BigQuery' service)."
+                  }
+                },
+                "required": ["type", "value"]
+              }
+            ],
+            "description": "Optional scope filter. Pass a domain name string (shorthand) or {type, value} object."
+          }
+        },
+        "required": [],
+        "examples": [
+          {
+            "description": "Scan governance coverage across all tables",
+            "entityType": "table"
+          },
+          {
+            "description": "Scan governance coverage for the Marketing domain",
+            "entityType": "table",
+            "scope": "Marketing"
+          },
+          {
+            "description": "Scan governance coverage for BigQuery service",
+            "entityType": "table",
+            "scope": {"type": "service", "value": "BigQuery"}
+          },
+          {
+            "description": "Scan governance coverage for dashboards",
+            "entityType": "dashboard"
+          }
+        ]
+      }
+    },
+    {
       "name": "root_cause_analysis",
-      "description": "Performs comprehensive root cause analysis via data quality lineage. First identifies upstream failures that may be causing issues for the specified asset. If failures are found, automatically analyzes downstream impact to show which assets may be affected. Returns both upstream root causes and downstream impact analysis. In the response 'status' indicates whether upstream failures were found. If 'status' is 'failed', the 'upstreamAnalysis' can be used to identify the nodes and edges leading to failures and downstreamAnalysis can tell what all nodes in downstream are impacted. If 'status' is 'success', it means no upstream failures were found, and downstream impact analysis was not performed.",
+      "description": "Performs comprehensive root cause analysis via data quality lineage. Supports multiple entity identification forms: fully qualified name (preferred), entity UUID, entity link (<#E::type::fqn>), or name+service combination. First identifies upstream failures that may be causing issues for the specified asset. If failures are found, automatically analyzes downstream impact to show which assets may be affected. Returns both upstream root causes and downstream impact analysis in a structured envelope. In the response 'status' indicates whether upstream failures were found. If 'status' is 'failed', the 'upstreamAnalysis' can be used to identify the nodes and edges leading to failures and downstreamAnalysis can tell what all nodes in downstream are impacted. If 'status' is 'success', it means no upstream failures were found, and downstream impact analysis was not performed. Failed test case results are capped at 5 per suite (maxTestCaseResultsPerSuite) to control context size; set 'truncated: true' in the response if more exist.",
       "parameters": {
         "type": "object",
         "properties": {
           "fqn": {
             "type": "string",
-            "description": "Fully qualified name of the entity to analyze for root cause analysis"
+            "description": "Fully qualified name of the entity to analyze for root cause analysis."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Use when you have the entity ID from a previous response."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Example: <#E::table::postgres.mydb.myschema.mytable>."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity (not fully qualified). Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service' for table/schema entities."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database' for table entities."
           },
           "upstreamDepth": {
             "type": "integer",
-            "description": "Number of levels upstream to traverse for root cause analysis. Default is 3.",
+            "description": "Number of levels upstream to traverse for root cause analysis. Default is 3. Set to 0 to disable upstream traversal.",
             "default": 3
           },
           "downstreamDepth": {
             "type": "integer",
-            "description": "Number of levels downstream to traverse for impact analysis (only performed if upstream failures are found). Default is 3.",
+            "description": "Number of levels downstream to traverse for impact analysis (only performed if upstream failures are found). Default is 3. Set to 0 to disable downstream traversal.",
             "default": 3
           },
           "queryFilter": {
             "type": "string",
-            "description": "Optional Elasticsearch query filter to refine the lineage search results"
+            "description": "Optional Elasticsearch query filter to refine the lineage search results."
           },
           "includeDeleted": {
             "type": "boolean",
@@ -580,8 +1209,385 @@
           }
         },
         "required": [
-          "fqn",
           "entityType"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ]
+      }
+    },
+    {
+      "name": "validate_patch",
+      "description": "Previews the effect of a JSON Patch without applying it. Accepts the same inputs as `patch_entity` but returns {beforeSnapshot, afterSnapshot, diff, affectedDownstreamCount, affectedDownstreamCountNote, warnings[]} without mutating any state. Use this to review changes before calling `patch_entity` to apply them. The `diff` field shows RFC 6902 JSON Patch operations that represent the difference between before and after snapshots. The `affectedDownstreamCount` is capped at 1-hop lineage and is NOT exhaustive — the `affectedDownstreamCountNote` field reminds consumers to use `change_impact` for full blast-radius analysis. Warnings flag semantically risky changes: ownerRemoval (removing all owners), tierRemoval (removing tier), massTagRemoval (removing ≥5 tags), descriptionCleared (clearing the description). This is a read-only, non-mutating tool.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity to patch (e.g. 'table', 'dashboard', 'topic', 'pipeline', 'mlmodel', 'container', 'glossary', 'glossaryTerm')."
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the entity to validate the patch against."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Use when you have the entity ID from a previous response."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>. Example: <#E::table::postgres.mydb.myschema.mytable>."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity (not fully qualified). Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service' for table/schema entities."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database' for table entities."
+          },
+          "patch": {
+            "type": "string",
+            "description": "JSON Patch operations as a string (RFC 6902). Must be a JSON array of objects with 'op' (add/remove/replace/move/copy/test), 'path' (JSON pointer), and 'value' (for add/replace). Use plural field names for array fields (e.g. /owners, /domains, /tags)."
+          }
+        },
+        "required": [
+          "entityType",
+          "patch"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ],
+        "examples": [
+          {
+            "description": "Preview adding an owner to a table",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.mytable",
+            "patch": "[{\"op\":\"add\",\"path\":\"/owners/-\",\"value\":{\"id\":\"uuid-here\",\"type\":\"user\"}}]"
+          },
+          {
+            "description": "Preview removing tier from a table",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.mytable",
+            "patch": "[{\"op\":\"remove\",\"path\":\"/tier\"}]"
+          },
+          {
+            "description": "Preview replacing the description",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.mytable",
+            "patch": "[{\"op\":\"replace\",\"path\":\"/description\",\"value\":\"Updated description\"}]"
+          }
+        ]
+      }
+    },
+    {
+      "name": "generate_data_contract",
+      "description": "Exports a data contract YAML from a table entity. The contract captures the current state of the entity including schema (columns), owners, tier, tags, glossary terms, domains, and optional fields like retentionPeriod, sourceUrl, and schemaDefinition. The contract uses apiVersion: openmetadata.org/v1alpha1 and is designed for Git version control. Use `apply_data_contract` to re-import an edited contract. This is a read-only, non-mutating tool.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity to export (default: 'table'). Currently only table entities are fully supported with schema export."
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the entity to export as a data contract."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Use when you have the entity ID from a previous response."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::entityType::fqn>."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity (not fully qualified). Must be combined with 'service' (and optionally 'database', 'schema')."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction."
+          }
+        },
+        "allOf": [
+          {"required": ["entityType"]},
+          {"anyOf": [
+            {"required": ["fqn"]},
+            {"required": ["fullyQualifiedName"]},
+            {"required": ["id"]},
+            {"required": ["entityLink"]},
+            {"required": ["name", "service"]}
+          ]}
+        ],
+        "examples": [
+          {
+            "description": "Export a data contract for the orders table",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.orders"
+          }
+        ]
+      }
+    },
+    {
+      "name": "apply_data_contract",
+      "description": "Applies a data contract YAML to bring a catalog entity into conformance with the contract. Computes the JSON Patch operations needed, previews the diff (dryRun=true, default), or applies the changes with atomic rollback on failure (dryRun=false). By default, dryRun=true returns a preview with a validate_patch-style diff showing before/after snapshots, warnings, and affected downstream count. Set dryRun=false to apply the patch. The contract must contain metadata.fqn identifying the target entity. If the entity does not exist, set createIfMissing=true to signal intent (automatic creation is deferred). The patch is atomic: either all changes apply or none do, so no inconsistent catalog state is possible. Schema: apiVersion: openmetadata.org/v1alpha1.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "contractYaml": {
+            "type": "string",
+            "description": "The data contract YAML string (as produced by generate_data_contract). Must contain metadata.fqn identifying the target entity."
+          },
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity (default: 'table'). Must match the entity referenced in the contract."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "If true (default), returns a preview of changes without applying them. If false, applies the changes to the catalog."
+          },
+          "createIfMissing": {
+            "type": "boolean",
+            "description": "If true, allows creating entities referenced by the contract that don't exist yet. If false (default), throws an error when the entity is not found."
+          }
+        },
+        "required": [
+          "contractYaml"
+        ],
+        "examples": [
+          {
+            "description": "Preview applying a data contract (dry run)",
+            "contractYaml": "---\napiVersion: openmetadata.org/v1alpha1\nkind: DataContract\nmetadata:\n  fqn: postgres.mydb.myschema.orders\n  owners:\n    - admin\ntier: Tier.Tier2",
+            "dryRun": true
+          },
+          {
+            "description": "Apply a data contract",
+            "contractYaml": "---\napiVersion: openmetadata.org/v1alpha1\nkind: DataContract\nmetadata:\n  fqn: postgres.mydb.myschema.orders\n  owners:\n    - admin\ntier: Tier.Tier2",
+            "dryRun": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "lineage_from_sql",
+      "description": "Parses raw SQL and produces lineage edge proposals between catalog entities. Extracts source and target table references from SQL using JSQLParser, resolves each table against the OpenMetadata catalog, and assigns a confidence score. Supported SQL shapes: SELECT FROM, INSERT INTO SELECT, CREATE TABLE AS SELECT, CREATE OR REPLACE VIEW AS, plus CTE inlining. Default apply=false returns a plan of proposed lineage edges without creating them. Set apply=true to create lineage edges for high-confidence matches (confidence ≥ 0.8); low-confidence edges are returned under requiresConfirmation for manual review. Rejects SQL exceeding 4000 characters or with unparseable syntax. This tool bridges the gap between SQL snippets (dbt models, Airflow tasks, notebooks) and the catalog's lineage graph.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sql": {
+            "type": "string",
+            "description": "Raw SQL string to parse for lineage extraction. Maximum length is 4000 characters. Supports SELECT, INSERT INTO SELECT, CREATE TABLE AS SELECT, CREATE/ALTER VIEW, and CTE (WITH) constructs."
+          },
+          "defaultService": {
+            "type": "string",
+            "description": "Default database service name for table resolution. When table names in SQL lack a service prefix, this service is used to construct candidate FQNs (e.g., 'postgres'). Improves confidence scores by narrowing the search scope."
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "If true, creates lineage edges for all resolved tables with confidence ≥ 0.8. Low-confidence edges are returned under requiresConfirmation. If false (default), returns the plan without creating any edges.",
+            "default": false
+          }
+        },
+        "required": ["sql"],
+        "examples": [
+          {
+            "description": "Extract lineage from a dbt model SQL",
+            "sql": "CREATE TABLE orders_summary AS SELECT o.id, c.name FROM orders o JOIN customers c ON o.customer_id = c.id",
+            "defaultService": "postgres",
+            "apply": false
+          },
+          {
+            "description": "Parse INSERT INTO SELECT and apply high-confidence edges",
+            "sql": "INSERT INTO db.report_table SELECT * FROM db.staging_table",
+            "defaultService": "snowflake",
+            "apply": true
+          },
+          {
+            "description": "Extract lineage from a view with CTE",
+            "sql": "WITH recent_orders AS (SELECT * FROM orders WHERE date > '2024-01-01') CREATE OR REPLACE VIEW v_recent AS SELECT * FROM recent_orders",
+            "defaultService": "postgres"
+          },
+          {
+            "description": "Parse a simple SELECT to identify source tables",
+            "sql": "SELECT a, b FROM public.bar JOIN public.baz ON bar.id = baz.id"
+          }
+        ]
+      }
+    },
+    {
+      "name": "suggest_test_cases",
+      "description": "Proposes test cases for a table based on its schema, constraints, profiler data, and lineage. Generates suggestions for: columnValuesToBeNotNull (PK/NOT_NULL columns), columnValuesToBeUnique (PK columns), tableRowCountToBeBetween (profiler ±3σ), tableFreshness (update cadence), and referential integrity (FK constraints). Each proposal includes testDefinitionFqn, parameters, rationale, and confidence. Does NOT apply proposals — use create_test_case to apply explicitly.",
+      "parameters": {
+        "description": "Identify the table using fqn, fullyQualifiedName, id, entityLink, or name+service. The tool analyzes schema, constraints, and profiler data to suggest tests.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity. Only 'table' is supported (default).",
+            "default": "table"
+          },
+          "fqn": {
+            "type": "string",
+            "description": "Fully qualified name of the table."
+          },
+          "fullyQualifiedName": {
+            "type": "string",
+            "description": "Alias for 'fqn'. Accepts the 'fullyQualifiedName' value returned by search tools directly. If both are provided, 'fqn' takes precedence."
+          },
+          "id": {
+            "type": "string",
+            "description": "UUID of the entity. Alternative to fqn/fullyQualifiedName for entity identification."
+          },
+          "entityLink": {
+            "type": "string",
+            "description": "OpenMetadata entity link in Markdown format: <#E::table::fqn>. Alternative identification form."
+          },
+          "name": {
+            "type": "string",
+            "description": "Simple name of the entity. Must be combined with 'service' (and optionally 'database', 'schema') to construct the FQN."
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name for composite FQN construction. Used with 'name' parameter."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name for composite FQN construction. Used with 'name' and 'service'."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema name for composite FQN construction. Used with 'name', 'service', and 'database'."
+          }
+        },
+        "required": [
+          "entityType"
+        ],
+        "anyOf": [
+          {"required": ["fqn"]},
+          {"required": ["fullyQualifiedName"]},
+          {"required": ["id"]},
+          {"required": ["entityLink"]},
+          {"required": ["name", "service"]}
+        ],
+        "examples": [
+          {
+            "description": "Suggest test cases for the orders table",
+            "entityType": "table",
+            "fqn": "postgres.mydb.myschema.orders"
+          },
+          {
+            "description": "Suggest tests using fullyQualifiedName from search results",
+            "entityType": "table",
+            "fullyQualifiedName": "bigquery.project.dataset.customers"
+          }
+        ]
+      }
+    },
+    {
+      "name": "rank_assets_by_cost",
+      "description": "Ranks data assets by cost × freshness (staleness) priority score. Uses usage percentile rank, storage size, and time since last update to identify expensive, stale tables wasting money. Returns top-N ranked assets with costScore, stalenessScore, and priorityScore. Tables missing usage or size data are listed under 'insufficientSignal' (never silently dropped). Supports optional scope filtering by domain or service, minStalenessDays filter, and configurable limit. Scoring formula: priorityScore = costScore × (1 + stalenessScore), where costScore = usageRank × (1 + sizeWeight) and stalenessScore = min(daysSinceUpdate / 30, 5.0) / 5.0. Rate-limited to one call per user per 5 minutes. This is a read-only tool — it does not modify any entities.",
+      "parameters": {
+        "description": "Optionally filter by scope (domain/service), minimum staleness days, and limit. Default ranks tables by cost × freshness.",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity to rank. Default is 'table'. Other options: 'dashboard', 'topic', 'pipeline', 'mlmodel', 'container'.",
+            "default": "table"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Domain name to scope the ranking (shorthand for domain scope)."
+              },
+              {
+                "type": "object",
+                "description": "Scope filter with explicit type and value.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Scope type: 'domain' or 'service'.",
+                    "enum": ["domain", "service"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Scope value (e.g., 'Marketing' domain or 'BigQuery' service)."
+                  }
+                },
+                "required": ["type", "value"]
+              }
+            ],
+            "description": "Optional scope filter. Pass a domain name string (shorthand) or {type, value} object."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of ranked assets to return. Default is 25, maximum is 200.",
+            "default": 25
+          },
+          "minStalenessDays": {
+            "type": "number",
+            "description": "Minimum days since last update to include in ranking. Default is 0 (include all). Use this to focus on stale assets (e.g., minStalenessDays=30 for assets not updated in 30+ days).",
+            "default": 0
+          }
+        },
+        "required": [],
+        "examples": [
+          {
+            "description": "Rank tables by cost × freshness across the catalog",
+            "entityType": "table"
+          },
+          {
+            "description": "Which tables in Marketing domain are wasting money?",
+            "entityType": "table",
+            "scope": "Marketing"
+          },
+          {
+            "description": "Find stale expensive tables in BigQuery",
+            "entityType": "table",
+            "scope": {"type": "service", "value": "BigQuery"},
+            "minStalenessDays": 30
+          },
+          {
+            "description": "Top 10 most expensive stale assets",
+            "entityType": "table",
+            "limit": 10,
+            "minStalenessDays": 7
+          }
         ]
       }
     }

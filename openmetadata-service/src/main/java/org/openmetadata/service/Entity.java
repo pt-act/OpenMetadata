@@ -421,9 +421,23 @@ public final class Entity {
     initializedRepositories = false;
     collectionDAO = null;
     jobDAO = null;
+    jdbi = null;
+    tokenRepository = null;
+    policyRepository = null;
+    roleRepository = null;
+    feedRepository = null;
+    lineageRepository = null;
+    usageRepository = null;
+    systemRepository = null;
+    changeEventRepository = null;
     searchRepository = null;
+    auditLogRepository = null;
+    suggestionRepository = null;
+    typeRepository = null;
     entityRelationshipRepository = null;
     ENTITY_REPOSITORY_MAP.clear();
+    ENTITY_TS_REPOSITORY_MAP.clear();
+    ENTITY_LIST.clear();
   }
 
   public static <T extends EntityInterface> void registerEntity(

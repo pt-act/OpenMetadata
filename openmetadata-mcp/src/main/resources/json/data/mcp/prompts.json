@@ -18,6 +18,24 @@
           "description": "Maximum number of results to return. Default is 10. Try to keep this number low unless the user asks for more."
         }
       ]
+    },
+    {
+      "name": "ownership_stewardship",
+      "description": "Guides a data steward through the 3-step ownership assignment workflow: find unowned assets, suggest best owners, and draft review-ready ownership patches. Use this when the user wants to identify and fix governance gaps (assets without owners).",
+      "arguments": [
+        {
+          "name": "entityType",
+          "description": "Entity type to search for unowned assets. Default is 'table'."
+        },
+        {
+          "name": "scope",
+          "description": "Optional scope filter — a domain name string (shorthand) or {type, value} object with type 'domain' or 'service'."
+        },
+        {
+          "name": "limit",
+          "description": "Maximum number of unowned assets to return. Default is 25, maximum is 200."
+        }
+      ]
     }
   ]
 }

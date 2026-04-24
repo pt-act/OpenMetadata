@@ -19,7 +19,7 @@ class SearchMetadataAggregationTest {
     // Call with includeAggregations=false (default behavior)
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), false, 10);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), false, 10);
 
     // Aggregations should NOT be present
     assertFalse(result.containsKey("aggregations"));
@@ -33,7 +33,7 @@ class SearchMetadataAggregationTest {
     // Call with includeAggregations=true
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), true, 10);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), true, 10);
 
     // Aggregations should be present
     assertTrue(result.containsKey("aggregations"));
@@ -48,7 +48,7 @@ class SearchMetadataAggregationTest {
     // Call with maxAggregationBuckets=5
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), true, 5);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), true, 5);
 
     // Verify aggregations are present
     assertTrue(result.containsKey("aggregations"));
@@ -81,7 +81,7 @@ class SearchMetadataAggregationTest {
     // Call with maxAggregationBuckets=10 (more than bucket count)
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), true, 10);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), true, 10);
 
     // Verify aggregations are present
     assertTrue(result.containsKey("aggregations"));
@@ -107,7 +107,7 @@ class SearchMetadataAggregationTest {
 
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), true, 5);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), true, 5);
 
     assertTrue(result.containsKey("aggregations"));
     @SuppressWarnings("unchecked")
@@ -128,7 +128,7 @@ class SearchMetadataAggregationTest {
 
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), true, 10);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), true, 10);
 
     // Should not throw and should not add aggregations key for empty map
     assertFalse(result.containsKey("aggregations"));
@@ -141,7 +141,7 @@ class SearchMetadataAggregationTest {
 
     Map<String, Object> result =
         SearchMetadataTool.buildEnhancedSearchResponse(
-            searchResponse, "test query", 10, Collections.emptyList(), true, 5);
+            searchResponse, "test query", 0, 10, Collections.emptyList(), true, 5);
 
     @SuppressWarnings("unchecked")
     Map<String, Object> aggregations = (Map<String, Object>) result.get("aggregations");

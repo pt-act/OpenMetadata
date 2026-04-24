@@ -175,6 +175,17 @@ public class McpTestUtils {
     return createToolCallRequest("root_cause_analysis", arguments);
   }
 
+  public static Map<String, Object> createValidatePatchToolCall(
+      String entityType, String fqn, String patch) {
+    Map<String, Object> arguments = new HashMap<>();
+    arguments.put("entityType", entityType);
+    arguments.put("fqn", fqn);
+    arguments.put("patch", patch);
+    arguments.put("Authorization", createAuthorizationHeader("test-token"));
+
+    return createToolCallRequest("validate_patch", arguments);
+  }
+
   public static Map<String, Object> createMetricToolCall(
       String name,
       String description,

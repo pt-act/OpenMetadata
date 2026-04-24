@@ -3,6 +3,7 @@ package org.openmetadata.mcp.tools;
 import static org.openmetadata.mcp.tools.SearchMetadataTool.cleanSearchResponseObject;
 import static org.openmetadata.service.search.SearchUtils.isConnectedVia;
 
+import com.google.common.annotations.VisibleForTesting;
 import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.util.Collections;
@@ -15,6 +16,7 @@ import org.openmetadata.schema.api.lineage.LineageDirection;
 import org.openmetadata.schema.api.lineage.SearchLineageRequest;
 import org.openmetadata.schema.api.lineage.SearchLineageResult;
 import org.openmetadata.schema.tests.type.TestCaseResult;
+import org.openmetadata.schema.type.EntityReference;
 import org.openmetadata.schema.type.MetadataOperation;
 import org.openmetadata.schema.utils.JsonUtils;
 import org.openmetadata.schema.utils.ResultList;
@@ -24,46 +26,105 @@ import org.openmetadata.service.limits.Limits;
 import org.openmetadata.service.search.SearchListFilter;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
-import org.openmetadata.service.security.policyevaluator.OperationContext;
-import org.openmetadata.service.security.policyevaluator.ResourceContext;
 
 @Slf4j
 public class RootCauseAnalysisTool implements McpTool {
 
   private static final int MAX_DEPTH = 10;
+  private static final int MAX_TEST_CASE_RESULTS_PER_SUITE = 5;
 
+  /**
+   * Production call — creates default bridge interfaces that delegate to {@link Entity} static
+   * methods and the real authorizer.
+   */
   @Override
   public Map<String, Object> execute(
       Authorizer authorizer,
       CatalogSecurityContext securityContext,
       Map<String, Object> parameters) {
-    String fqn = (String) parameters.get("fqn");
+    return execute(
+        parameters,
+        McpEntityBridge.defaultEntityReferenceResolver(),
+        McpEntityBridge.defaultAuthorizer(authorizer, securityContext),
+        McpEntityBridge.defaultSearchRepositoryProvider(),
+        McpEntityBridge.defaultTimeSeriesRepositoryProvider(),
+        McpEntityBridge.defaultEntityFetcher());
+  }
+
+  /**
+   * Test-friendly overload — accepts injected functional interfaces for all {@link Entity}
+   * static method calls and authorizer delegation, eliminating the need for {@code
+   * mockStatic(Entity.class)}.
+   */
+  @VisibleForTesting
+  Map<String, Object> execute(
+      Map<String, Object> parameters,
+      McpEntityBridge.EntityReferenceResolver referenceResolver,
+      McpEntityBridge.McpAuthorizer authorizer,
+      McpEntityBridge.SearchRepositoryProvider searchRepoProvider,
+      McpEntityBridge.TimeSeriesRepositoryProvider timeSeriesRepoProvider,
+      McpEntityBridge.EntityFetcher entityFetcher) {
     String entityType = (String) parameters.getOrDefault("entityType", "table");
+
+    // Use resolveEntityRef for multi-form entity identification (E1.5)
+    // Supports: fqn, fullyQualifiedName, id, entityLink, name+service
+    EntityReference entityRef =
+        ToolUtils.resolveEntityRef(parameters, entityType, referenceResolver);
+    String fqn = entityRef.getFullyQualifiedName();
+
     int upstreamDepth =
-        Math.min(Math.max(parseIntParam(parameters.get("upstreamDepth"), 3), 1), MAX_DEPTH);
+        Math.min(Math.max(parseIntParam(parameters.get("upstreamDepth"), 3), 0), MAX_DEPTH);
     int downstreamDepth =
-        Math.min(Math.max(parseIntParam(parameters.get("downstreamDepth"), 3), 1), MAX_DEPTH);
+        Math.min(Math.max(parseIntParam(parameters.get("downstreamDepth"), 3), 0), MAX_DEPTH);
     String queryFilter = (String) parameters.get("queryFilter");
     boolean includeDeleted = parseBooleanParam(parameters.get("includeDeleted"), false);
 
-    if (fqn == null || fqn.trim().isEmpty()) {
-      throw new IllegalArgumentException("Parameter 'fqn' is required and cannot be empty");
-    }
-
-    authorizer.authorize(
-        securityContext,
-        new OperationContext(entityType, MetadataOperation.VIEW_BASIC),
-        new ResourceContext<>(entityType));
+    authorizer.authorize(entityType, MetadataOperation.VIEW_BASIC);
 
     try {
+      var searchRepo = searchRepoProvider.getSearchRepository();
+      if (searchRepo == null) {
+        LOG.warn(
+            "Search repository not initialized — cannot perform root cause analysis for '{}'", fqn);
+        Map<String, Object> errorResult = new HashMap<>();
+        errorResult.put("error", "Search repository not initialized");
+        EnvelopeBuilder envelope =
+            EnvelopeBuilder.create()
+                .results(List.of(errorResult))
+                .narrative(
+                    "Root cause analysis could not be completed: search repository not initialized.");
+        Map<String, Object> envelopeResult = new HashMap<>(envelope.build());
+        envelopeResult.put("fqn", fqn);
+        envelopeResult.put("entityType", entityType);
+        envelopeResult.put("status", "error");
+        return envelopeResult;
+      }
+
+      // Build the analysis result — domain fields only (upstream/downstream analysis).
+      // Top-level metadata (fqn, entityType, status, depths) is added to the envelope below.
       Map<String, Object> result = new HashMap<>();
-      result.put("fqn", fqn);
-      result.put("upstreamDepth", upstreamDepth);
-      result.put("downstreamDepth", downstreamDepth);
 
       Response upstreamResponse =
-          Entity.getSearchRepository()
-              .searchDataQualityLineage(fqn.trim(), upstreamDepth, queryFilter, includeDeleted);
+          searchRepo.searchDataQualityLineage(
+              fqn.trim(), upstreamDepth, queryFilter, includeDeleted);
+
+      if (upstreamResponse == null) {
+        LOG.warn("Search repository returned null response for data quality lineage of '{}'", fqn);
+        Map<String, Object> errorResult = new HashMap<>();
+        errorResult.put(
+            "error",
+            "Search repository returned null response for data quality lineage of '" + fqn + "'");
+        EnvelopeBuilder envelope =
+            EnvelopeBuilder.create()
+                .results(List.of(errorResult))
+                .narrative(
+                    "Root cause analysis could not be completed: search repository unavailable.");
+        Map<String, Object> envelopeResult = new HashMap<>(envelope.build());
+        envelopeResult.put("fqn", fqn);
+        envelopeResult.put("entityType", entityType);
+        envelopeResult.put("status", "error");
+        return envelopeResult;
+      }
 
       Object upstreamEntity = upstreamResponse.getEntity();
       Map<String, Object> upstreamAnalysis = new HashMap<>();
@@ -90,7 +151,10 @@ public class RootCauseAnalysisTool implements McpTool {
         if (!upstreamNodes.isEmpty()) {
           upstreamAnalysis.put("failingUpstreamNodes", upstreamNodes);
           upstreamNodes.forEach(
-              node -> node.put("failingTestCases", addTestCaseResultForTestSuite(node)));
+              node ->
+                  node.put(
+                      "failingTestCases",
+                      addTestCaseResultForTestSuite(node, timeSeriesRepoProvider)));
         }
 
         upstreamAnalysis.put("failingUpstreamEdgesCount", upstreamEdgesList.size());
@@ -114,21 +178,37 @@ public class RootCauseAnalysisTool implements McpTool {
                   .withIncludeDeleted(includeDeleted);
 
           SearchLineageResult downstreamResult =
-              Entity.getSearchRepository().searchLineageWithDirection(downstreamRequest);
+              searchRepo.searchLineageWithDirection(downstreamRequest);
 
           downstreamAnalysis.put(
               "description", "Downstream entities that may be impacted by the identified failures");
 
           if (downstreamResult.getNodes() != null) {
-            downstreamAnalysis.put(
-                "downstreamImpactedNodesCount", downstreamResult.getNodes().size());
-            downstreamAnalysis.put("downstreamNodes", downstreamResult.getNodes());
+            List<Map<String, Object>> cleanedDownstreamNodes =
+                downstreamResult.getNodes().values().stream()
+                    .map(
+                        node -> {
+                          Map<String, Object> nodeMap = JsonUtils.getMap(node);
+                          return cleanSearchResponseObject(
+                              nodeMap != null ? new HashMap<>(nodeMap) : new HashMap<>());
+                        })
+                    .toList();
+            downstreamAnalysis.put("downstreamImpactedNodesCount", cleanedDownstreamNodes.size());
+            downstreamAnalysis.put("downstreamNodes", cleanedDownstreamNodes);
           }
 
           if (downstreamResult.getDownstreamEdges() != null) {
-            downstreamAnalysis.put(
-                "downstreamImpactedEdgesCount", downstreamResult.getDownstreamEdges().size());
-            downstreamAnalysis.put("downstreamEdges", downstreamResult.getDownstreamEdges());
+            List<Map<String, Object>> cleanedDownstreamEdges =
+                downstreamResult.getDownstreamEdges().values().stream()
+                    .map(
+                        edge -> {
+                          Map<String, Object> edgeMap = JsonUtils.getMap(edge);
+                          return cleanSearchResponseObject(
+                              edgeMap != null ? new HashMap<>(edgeMap) : new HashMap<>());
+                        })
+                    .toList();
+            downstreamAnalysis.put("downstreamImpactedEdgesCount", cleanedDownstreamEdges.size());
+            downstreamAnalysis.put("downstreamEdges", cleanedDownstreamEdges);
           }
 
           LOG.info(
@@ -152,19 +232,29 @@ public class RootCauseAnalysisTool implements McpTool {
 
       result.put("downstreamAnalysis", downstreamAnalysis);
 
-      result.put("status", hasFailures ? "failed" : "success");
-      result.put(
-          "summary",
+      String narrative =
           String.format(
               "Analyzed upstream causes and downstream impacts for '%s'. Found %d upstream failure(s).",
-              fqn, failureCount));
+              fqn, failureCount);
+
+      // Wrap in envelope for consistency with other MCP tools (E1.8)
+      EnvelopeBuilder envelope =
+          EnvelopeBuilder.create().results(List.of(result)).narrative(narrative);
+      Map<String, Object> envelopeResult = new HashMap<>(envelope.build());
+      // Merge top-level fields into envelope for backward compat
+      envelopeResult.put("fqn", fqn);
+      envelopeResult.put("entityType", entityType);
+      envelopeResult.put("status", hasFailures ? "failed" : "success");
+      envelopeResult.put("summary", narrative);
+      envelopeResult.put("upstreamDepth", upstreamDepth);
+      envelopeResult.put("downstreamDepth", downstreamDepth);
 
       LOG.info(
           "Comprehensive root cause analysis completed for entity: {} - Upstream failures: {}",
           fqn,
           hasFailures);
 
-      return result;
+      return envelopeResult;
 
     } catch (IOException e) {
       LOG.error("IOException during root cause analysis for entity: {}", fqn, e);
@@ -177,7 +267,9 @@ public class RootCauseAnalysisTool implements McpTool {
     }
   }
 
-  private Map<String, Object> addTestCaseResultForTestSuite(Map<String, Object> node) {
+  private Map<String, Object> addTestCaseResultForTestSuite(
+      Map<String, Object> node,
+      McpEntityBridge.TimeSeriesRepositoryProvider timeSeriesRepoProvider) {
     Map<String, Object> testCaseResult = new HashMap<>();
     Map<String, Object> testSuiteMap = JsonUtils.getMap(node.get("testSuite"));
     if (testSuiteMap == null || testSuiteMap.get("id") == null) {
@@ -188,7 +280,8 @@ public class RootCauseAnalysisTool implements McpTool {
     searchListFilter.addQueryParam("testCaseStatus", "Failed");
     searchListFilter.addQueryParam("testSuiteId", testSuiteId);
     TestCaseResultRepository testResultTimeSeriesRepository =
-        (TestCaseResultRepository) Entity.getEntityTimeSeriesRepository(Entity.TEST_CASE_RESULT);
+        (TestCaseResultRepository)
+            timeSeriesRepoProvider.getEntityTimeSeriesRepository(Entity.TEST_CASE_RESULT);
     try {
       ResultList<TestCaseResult> testCaseResults =
           testResultTimeSeriesRepository.listLatestFromSearch(
@@ -201,7 +294,17 @@ public class RootCauseAnalysisTool implements McpTool {
               null,
               null);
       if (testCaseResults.getData() != null && !testCaseResults.getData().isEmpty()) {
-        testCaseResult.put("testCaseResults", testCaseResults.getData());
+        List<TestCaseResult> results = testCaseResults.getData();
+        if (results.size() > MAX_TEST_CASE_RESULTS_PER_SUITE) {
+          results = results.subList(0, MAX_TEST_CASE_RESULTS_PER_SUITE);
+          testCaseResult.put("truncated", true);
+          testCaseResult.put(
+              "message",
+              String.format(
+                  "Showing top %d of %d failed test cases per suite.",
+                  MAX_TEST_CASE_RESULTS_PER_SUITE, testCaseResults.getData().size()));
+        }
+        testCaseResult.put("testCaseResults", results);
         testCaseResult.put("testSuiteId", testSuiteId);
       } else {
         LOG.info("No failed test case results found for test suite: {}", testSuiteId);

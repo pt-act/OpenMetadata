@@ -1,14 +1,15 @@
 package org.openmetadata.mcp.tools;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.openmetadata.schema.utils.JsonUtils;
-import org.openmetadata.service.Entity;
 import org.openmetadata.service.limits.Limits;
 import org.openmetadata.service.search.vector.OpenSearchVectorService;
 import org.openmetadata.service.search.vector.utils.DTOs.VectorSearchResponse;
@@ -26,9 +27,35 @@ public class SemanticSearchTool implements McpTool {
   private static final int DESCRIPTION_MAX_LENGTH = 500;
   private static final int DESCRIPTION_TRUNCATE_LENGTH = 450;
 
+  /** Known filter keys that are recognized by semantic search. Unknown keys are tracked
+   * in ignoredFilters for transparency. Zero-coupling: unknown keys are not rejected,
+   * just reported — forward-compatible with new filter keys being added to the backend. */
+  private static final Set<String> KNOWN_FILTER_KEYS = Set.of("entityType", "service", "tags");
+
+  /**
+   * Production call — creates default bridge interfaces that delegate to {@link
+   * org.openmetadata.service.Entity} static methods.
+   */
   @Override
   public Map<String, Object> execute(
       Authorizer authorizer, CatalogSecurityContext securityContext, Map<String, Object> params)
+      throws IOException {
+    return execute(
+        params,
+        McpEntityBridge.defaultSearchRepositoryProvider(),
+        McpEntityBridge.defaultVectorServiceProvider());
+  }
+
+  /**
+   * Test-friendly overload — accepts injected {@link McpEntityBridge.SearchRepositoryProvider}
+   * and {@link McpEntityBridge.VectorServiceProvider} to eliminate the need for {@code
+   * mockStatic(Entity.class)} and {@code mockStatic(OpenSearchVectorService.class)}.
+   */
+  @VisibleForTesting
+  Map<String, Object> execute(
+      Map<String, Object> params,
+      McpEntityBridge.SearchRepositoryProvider searchRepoProvider,
+      McpEntityBridge.VectorServiceProvider vectorServiceProvider)
       throws IOException {
     LOG.info("Executing semanticSearch with params: {}", params);
 
@@ -37,12 +64,18 @@ public class SemanticSearchTool implements McpTool {
       return errorResponse("'query' parameter is required");
     }
 
-    if (!Entity.getSearchRepository().isVectorEmbeddingEnabled()) {
+    var searchRepo = searchRepoProvider.getSearchRepository();
+    if (searchRepo == null) {
+      return errorResponse(
+          "Search repository is not initialized. Please check OpenMetadata server configuration.");
+    }
+
+    if (!searchRepo.isVectorEmbeddingEnabled()) {
       return errorResponse(
           "Semantic search is not enabled. Configure vector embeddings in the OpenMetadata server settings.");
     }
 
-    OpenSearchVectorService vectorService = OpenSearchVectorService.getInstance();
+    OpenSearchVectorService vectorService = vectorServiceProvider.getVectorService();
     if (vectorService == null) {
       return errorResponse("Vector search service is not initialized");
     }
@@ -60,11 +93,12 @@ public class SemanticSearchTool implements McpTool {
     threshold = Math.min(Math.max(threshold, 0.0), 1.0);
 
     Map<String, List<String>> filters = parseFilters(params);
+    List<String> ignoredFilters = computeIgnoredFilters(params);
 
     try {
       VectorSearchResponse response =
           vectorService.search(query, filters, size, from, k, threshold);
-      return buildResponse(query, response, size);
+      return buildResponse(query, response, size, from, ignoredFilters);
     } catch (Exception e) {
       LOG.error("Semantic search failed: {}", e.getMessage(), e);
       return errorResponse("Semantic search failed: " + e.getMessage());
@@ -82,13 +116,21 @@ public class SemanticSearchTool implements McpTool {
   }
 
   private Map<String, Object> buildResponse(
-      String query, VectorSearchResponse response, int requestedSize) {
-    Map<String, Object> result = new HashMap<>();
-    result.put("query", query);
-    result.put("tookMillis", response.getTookMillis());
+      String query,
+      VectorSearchResponse response,
+      int requestedSize,
+      int from,
+      List<String> ignoredFilters) {
 
     if (response.getHits() == null || response.getHits().isEmpty()) {
-      result.put("results", Collections.emptyList());
+      Map<String, Object> result =
+          new HashMap<>(
+              EnvelopeBuilder.create()
+                  .results(Collections.emptyList())
+                  .pagination(from, requestedSize, 0)
+                  .build());
+      result.put("query", query);
+      result.put("tookMillis", response.getTookMillis());
       result.put("totalFound", 0);
       result.put("returnedCount", 0);
       result.put("message", "No results found for semantic search");
@@ -100,20 +142,45 @@ public class SemanticSearchTool implements McpTool {
       cleanedResults.add(cleanHit(hit));
     }
 
-    result.put("results", cleanedResults);
-    result.put("returnedCount", cleanedResults.size());
+    // Build envelope response (E1.8 — Expansions spec R1.4/R1.5)
+    // Convert ignoredFilters to warnings for the envelope, keeping top-level ignoredFilters
+    // for backward compatibility (compatibility shim in EnvelopeBuilder handles this)
+    List<String> warningList = new ArrayList<>();
+    for (String ignored : ignoredFilters) {
+      warningList.add("ignoredFilter: " + ignored);
+    }
+
+    EnvelopeBuilder envelope =
+        EnvelopeBuilder.create()
+            .results(cleanedResults)
+            .pagination(from, requestedSize, cleanedResults.size())
+            .warnings(warningList);
+
+    // Backward-compat fields kept for existing consumers
+    Map<String, Object> result = new HashMap<>(envelope.build());
+    result.put("query", query);
+    result.put("tookMillis", response.getTookMillis());
     result.put("totalFound", cleanedResults.size());
+    result.put("returnedCount", cleanedResults.size());
     result.put(
         "usage",
         "To get full details for any result, call get_entity_details with the result's exact 'entityType' and 'fullyQualifiedName' values.");
 
-    if (cleanedResults.size() >= requestedSize) {
+    if (cleanedResults.size() == requestedSize) {
       result.put(
           "message",
           String.format(
-              "Showing %d results. Increase 'size' or refine your query for different results. "
-                  + "Adjust 'threshold' to filter by similarity score.",
-              cleanedResults.size()));
+              "Showing %d results. There may be more available — increase 'size' to see more.",
+              requestedSize));
+    }
+
+    if (!ignoredFilters.isEmpty()) {
+      result.put(
+          "ignoredFiltersMessage",
+          String.format(
+              "The following filter keys are not recognized by semantic search and were ignored: %s. "
+                  + "Supported keys: entityType, service, tags.",
+              String.join(", ", ignoredFilters)));
     }
 
     return result;
@@ -234,6 +301,39 @@ public class SemanticSearchTool implements McpTool {
       }
     }
     return defaultValue;
+  }
+
+  /**
+   * Computes filter keys provided by the caller that are not in the known set.
+   * These are reported in the response as ignoredFilters for transparency,
+   * without rejecting the request (zero-coupling approach).
+   */
+  @SuppressWarnings("unchecked")
+  private List<String> computeIgnoredFilters(Map<String, Object> params) {
+    if (!params.containsKey("filters")) {
+      return Collections.emptyList();
+    }
+    Object filtersObj = params.get("filters");
+    Map<String, Object> rawFilters = null;
+    if (filtersObj instanceof Map) {
+      rawFilters = (Map<String, Object>) filtersObj;
+    } else if (filtersObj instanceof String filterStr) {
+      try {
+        rawFilters = JsonUtils.readValue(filterStr, Map.class);
+      } catch (Exception e) {
+        return Collections.emptyList();
+      }
+    }
+    if (rawFilters == null) {
+      return Collections.emptyList();
+    }
+    List<String> ignored = new ArrayList<>();
+    for (String key : rawFilters.keySet()) {
+      if (!KNOWN_FILTER_KEYS.contains(key)) {
+        ignored.add(key);
+      }
+    }
+    return ignored;
   }
 
   private Map<String, Object> errorResponse(String message) {

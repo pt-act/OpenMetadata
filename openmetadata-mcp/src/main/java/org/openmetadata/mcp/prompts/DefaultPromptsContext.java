@@ -31,6 +31,9 @@ public class DefaultPromptsContext {
         case "search_metadata":
           result = new SearchPrompt().callPrompt(promptRequest);
           break;
+        case "ownership_stewardship":
+          result = new OwnershipStewardshipPrompt().callPrompt(promptRequest);
+          break;
         default:
           return new McpSchema.GetPromptResult("error", new ArrayList<>());
       }

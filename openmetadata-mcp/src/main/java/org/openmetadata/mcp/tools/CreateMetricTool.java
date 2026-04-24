@@ -1,13 +1,14 @@
 package org.openmetadata.mcp.tools;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.openmetadata.schema.api.data.CreateMetric;
 import org.openmetadata.schema.api.data.MetricExpression;
 import org.openmetadata.schema.entity.data.Metric;
-import org.openmetadata.schema.type.MetadataOperation;
 import org.openmetadata.schema.type.MetricExpressionLanguage;
 import org.openmetadata.schema.type.MetricGranularity;
 import org.openmetadata.schema.type.MetricType;
@@ -21,8 +22,6 @@ import org.openmetadata.service.resources.metrics.MetricMapper;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.ImpersonationContext;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
-import org.openmetadata.service.security.policyevaluator.CreateResourceContext;
-import org.openmetadata.service.security.policyevaluator.OperationContext;
 import org.openmetadata.service.util.RestUtil;
 
 @Slf4j
@@ -34,12 +33,39 @@ public class CreateMetricTool implements McpTool {
     throw new UnsupportedOperationException("CreateMetricTool requires limit validation.");
   }
 
+  /**
+   * Production call — creates default bridge interfaces that delegate to {@link Entity} static
+   * methods and the real authorizer/limits.
+   */
   @Override
   public Map<String, Object> execute(
       Authorizer authorizer,
       Limits limits,
       CatalogSecurityContext securityContext,
       Map<String, Object> params) {
+    return execute(
+        securityContext,
+        params,
+        McpEntityBridge.defaultCreateOperationAuthorizer(authorizer, limits, securityContext),
+        McpEntityBridge.defaultRepositoryProvider(),
+        McpEntityBridge.defaultChangeEventPublisher());
+  }
+
+  /**
+   * Test-friendly overload — accepts a {@link McpEntityBridge.CreateOperationAuthorizer},
+   * {@link McpEntityBridge.RepositoryProvider}, and {@link McpEntityBridge.ChangeEventPublisher}
+   * for dependency injection. Tests inject a no-op authorizer, a lambda that returns a mock
+   * repository, and a no-op publisher, eliminating the need for {@code
+   * mockStatic(Entity.class)} — the {@code CreateResourceContext} constructor and {@code
+   * Entity.getCollectionDAO()} are never called.
+   */
+  @VisibleForTesting
+  Map<String, Object> execute(
+      CatalogSecurityContext securityContext,
+      Map<String, Object> params,
+      McpEntityBridge.CreateOperationAuthorizer<Metric> createOpAuthorizer,
+      McpEntityBridge.RepositoryProvider repoProvider,
+      McpEntityBridge.ChangeEventPublisher changeEventPublisher) {
     Object nameRaw = params.get("name");
     if (!(nameRaw instanceof String name) || name.isBlank()) {
       throw new IllegalArgumentException(
@@ -172,21 +198,48 @@ public class CreateMetricTool implements McpTool {
     Metric metric =
         mapper.createToEntity(createMetric, securityContext.getUserPrincipal().getName());
 
-    OperationContext operationContext =
-        new OperationContext(Entity.METRIC, MetadataOperation.CREATE);
-    CreateResourceContext<Metric> createResourceContext =
-        new CreateResourceContext<>(Entity.METRIC, metric);
-    limits.enforceLimits(securityContext, createResourceContext, operationContext);
-    authorizer.authorize(securityContext, operationContext, createResourceContext);
+    // Use injected CreateOperationAuthorizer — no CreateResourceContext constructed when
+    // a test injects a no-op authorizer, so Entity.getEntityRepository() is never called
+    createOpAuthorizer.authorizeCreate(Entity.METRIC, metric);
 
-    MetricRepository repo = (MetricRepository) Entity.getEntityRepository(Entity.METRIC);
+    // Use injected RepositoryProvider instead of Entity.getEntityRepository() directly
+    MetricRepository repo = (MetricRepository) repoProvider.getEntityRepository(Entity.METRIC);
     repo.prepareInternal(metric, false);
 
     String userName = securityContext.getUserPrincipal().getName();
     String impersonatedBy = ImpersonationContext.getImpersonatedBy();
     RestUtil.PutResponse<Metric> response =
         repo.createOrUpdate(null, metric, userName, impersonatedBy);
-    McpChangeEventUtil.publishChangeEvent(response.getEntity(), response.getChangeType(), userName);
-    return JsonUtils.getMap(response.getEntity());
+    changeEventPublisher.publishChangeEvent(
+        response.getEntity(), response.getChangeType(), userName);
+
+    // Wrap in envelope for consistency with other MCP tools (E1.8)
+    Map<String, Object> entityData = JsonUtils.getMap(response.getEntity());
+    return buildMetricResponse(entityData, name, lang);
+  }
+
+  /**
+   * Builds the metric creation response envelope. Extracted as a static method for unit testing
+   * since MetricRepository and MetricMapper require extensive mocking.
+   *
+   * @param entityData the serialized metric entity data (may be null)
+   * @param metricName the name of the created metric
+   * @param expressionLanguage the expression language used by the metric
+   * @return envelope map with results, narrative, and backward-compat fields
+   */
+  @VisibleForTesting
+  static Map<String, Object> buildMetricResponse(
+      Map<String, Object> entityData, String metricName, String expressionLanguage) {
+    EnvelopeBuilder envelope =
+        EnvelopeBuilder.create()
+            .results(entityData != null ? List.of(entityData) : List.of())
+            .narrative(
+                String.format(
+                    "Created metric '%s' with expression language '%s'.",
+                    metricName, expressionLanguage));
+    Map<String, Object> result = new HashMap<>(envelope.build());
+    // Backward-compat fields kept for existing consumers
+    result.put("metricName", metricName);
+    return result;
   }
 }

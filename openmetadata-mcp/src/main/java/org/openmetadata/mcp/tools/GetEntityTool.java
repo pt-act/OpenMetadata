@@ -2,18 +2,18 @@ package org.openmetadata.mcp.tools;
 
 import static org.openmetadata.schema.type.MetadataOperation.VIEW_ALL;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.openmetadata.schema.type.EntityReference;
 import org.openmetadata.schema.utils.JsonUtils;
 import org.openmetadata.service.Entity;
 import org.openmetadata.service.limits.Limits;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
-import org.openmetadata.service.security.policyevaluator.OperationContext;
-import org.openmetadata.service.security.policyevaluator.ResourceContext;
 
 @Slf4j
 public class GetEntityTool implements McpTool {
@@ -46,20 +46,44 @@ public class GetEntityTool implements McpTool {
           "embeddings",
           "extension");
 
+  /**
+   * Production call — creates default bridge interfaces that delegate to {@link Entity} static
+   * methods and the real authorizer.
+   */
   @Override
   public Map<String, Object> execute(
       Authorizer authorizer, CatalogSecurityContext securityContext, Map<String, Object> params)
       throws IOException {
+    return execute(
+        params,
+        McpEntityBridge.defaultEntityReferenceResolver(),
+        McpEntityBridge.defaultAuthorizer(authorizer, securityContext),
+        McpEntityBridge.defaultEntityFetcher());
+  }
+
+  /**
+   * Test-friendly overload — accepts injected functional interfaces to bypass {@link Entity}
+   * static methods and {@code ResourceContext}/{@code OperationContext} construction. Tests
+   * inject no-op authorizer and stub fetcher/resolver lambdas, eliminating the need for {@code
+   * mockStatic(Entity.class)}.
+   */
+  @VisibleForTesting
+  Map<String, Object> execute(
+      Map<String, Object> params,
+      McpEntityBridge.EntityReferenceResolver referenceResolver,
+      McpEntityBridge.McpAuthorizer authorizer,
+      McpEntityBridge.EntityFetcher entityFetcher)
+      throws IOException {
     String entityType = (String) params.get("entityType");
-    String fqn = (String) params.get("fqn");
-    authorizer.authorize(
-        securityContext,
-        new OperationContext(entityType, VIEW_ALL),
-        new ResourceContext<>(entityType));
+    // Use resolveEntityRef for multi-form entity identification (E1.5)
+    // Supports: fqn, fullyQualifiedName, id, entityLink, name+service
+    EntityReference entityRef = ToolUtils.resolveEntityRef(params, entityType, referenceResolver);
+    String fqn = entityRef.getFullyQualifiedName();
+    authorizer.authorize(entityType, VIEW_ALL);
     LOG.info("Getting details for entity type: {}, FQN: {}", entityType, fqn);
     String fields = "*";
     Map<String, Object> entityData =
-        JsonUtils.getMap(Entity.getEntityByName(entityType, fqn, fields, null));
+        JsonUtils.getMap(entityFetcher.getEntityByName(entityType, fqn, fields, null));
 
     // Clean response to optimize LLM context usage
     return cleanEntityResponse(entityData);

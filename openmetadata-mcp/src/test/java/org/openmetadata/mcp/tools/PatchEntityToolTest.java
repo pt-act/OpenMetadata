@@ -14,18 +14,18 @@ import jakarta.ws.rs.core.Response;
 import java.security.Principal;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.openmetadata.schema.EntityInterface;
+import org.openmetadata.schema.type.EntityReference;
 import org.openmetadata.schema.type.EventType;
 import org.openmetadata.schema.type.change.ChangeSource;
 import org.openmetadata.schema.utils.JsonUtils;
-import org.openmetadata.service.Entity;
 import org.openmetadata.service.jdbi3.EntityRepository;
-import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.ImpersonationContext;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
 import org.openmetadata.service.util.RestUtil;
@@ -33,16 +33,22 @@ import org.openmetadata.service.util.RestUtil;
 /**
  * Tests that PatchEntityTool correctly threads ImpersonationContext through to the repository
  * and publishes change events with the caller's userName.
+ *
+ * <p>All tests use {@link McpEntityBridge.EntityReferenceResolver}, {@link
+ * McpEntityBridge.PatchAuthorizer}, {@link McpEntityBridge.RepositoryProvider}, and {@link
+ * McpEntityBridge.ChangeEventPublisher} functional interfaces instead of {@code
+ * mockStatic(Entity.class)} or {@code mockStatic(McpChangeEventUtil.class)}, eliminating the need
+ * to mock Entity static initializers. The {@code Entity.getEntityReferenceByName()}, {@code
+ * Entity.getEntityRepository()}, and {@code McpChangeEventUtil.publishChangeEvent()} calls are never
+ * invoked because injected lambdas bypass them entirely.
  */
 class PatchEntityToolTest {
 
-  private Authorizer authorizer;
   private CatalogSecurityContext securityContext;
   private Principal principal;
 
   @BeforeEach
   void setUp() {
-    authorizer = mock(Authorizer.class);
     securityContext = mock(CatalogSecurityContext.class);
     principal = mock(Principal.class);
     when(principal.getName()).thenReturn("alice");
@@ -66,35 +72,50 @@ class PatchEntityToolTest {
     when(mockRepo.patch(any(), any(String.class), any(), any(), any(), any(), any()))
         .thenReturn(patchResponse);
 
+    EntityReference entityRef = mock(EntityReference.class);
+    when(entityRef.getFullyQualifiedName()).thenReturn("db.schema.test_table");
+
     Map<String, Object> params = new HashMap<>();
     params.put("entityType", "table");
     params.put("fqn", "db.schema.test_table");
     params.put("patch", "[]");
 
-    try (MockedStatic<Entity> entityMock = mockStatic(Entity.class);
-        MockedStatic<McpChangeEventUtil> changeEventMock = mockStatic(McpChangeEventUtil.class);
-        MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class)) {
+    // Inject functional interfaces — no mockStatic(Entity.class) needed
+    McpEntityBridge.EntityReferenceResolver referenceResolver =
+        (entityType, fqn, include) -> entityRef;
+    McpEntityBridge.PatchAuthorizer noOpAuthorizer = (entityType, jsonPatch, fqn1) -> {};
+    McpEntityBridge.RepositoryProvider repoProvider = (entityType) -> mockRepo;
+    McpEntityBridge.ChangeEventPublisher noOpPublisher = (entity, changeType, userName) -> {};
 
-      entityMock.when(() -> Entity.getEntityRepository("table")).thenReturn(mockRepo);
-      jsonMock.when(() -> JsonUtils.convertValue(any(), eq(Map.class))).thenReturn(Map.of());
+    try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class)) {
+      jsonMock
+          .when(() -> JsonUtils.convertValue(any(), eq(Map.class)))
+          .thenReturn(Map.of("status", "OK"));
 
-      new PatchEntityTool().execute(authorizer, securityContext, params);
-
-      ArgumentCaptor<String> impersonatedByCaptor = ArgumentCaptor.forClass(String.class);
-      verify(mockRepo)
-          .patch(
-              isNull(),
-              any(String.class),
-              eq("alice"),
-              any(),
-              eq(ChangeSource.MANUAL),
-              isNull(),
-              impersonatedByCaptor.capture());
-
-      assertThat(impersonatedByCaptor.getValue())
-          .as("impersonatedBy passed to repository must equal what was set in ImpersonationContext")
-          .isEqualTo("McpApplicationBot");
+      new PatchEntityTool()
+          .execute(
+              params,
+              securityContext,
+              referenceResolver,
+              noOpAuthorizer,
+              repoProvider,
+              noOpPublisher);
     }
+
+    ArgumentCaptor<String> impersonatedByCaptor = ArgumentCaptor.forClass(String.class);
+    verify(mockRepo)
+        .patch(
+            isNull(),
+            any(String.class),
+            eq("alice"),
+            any(),
+            eq(ChangeSource.MANUAL),
+            isNull(),
+            impersonatedByCaptor.capture());
+
+    assertThat(impersonatedByCaptor.getValue())
+        .as("impersonatedBy passed to repository must equal what was set in ImpersonationContext")
+        .isEqualTo("McpApplicationBot");
   }
 
   @Test
@@ -107,35 +128,50 @@ class PatchEntityToolTest {
     when(mockRepo.patch(any(), any(String.class), any(), any(), any(), any(), any()))
         .thenReturn(patchResponse);
 
+    EntityReference entityRef = mock(EntityReference.class);
+    when(entityRef.getFullyQualifiedName()).thenReturn("db.schema.test_table");
+
     Map<String, Object> params = new HashMap<>();
     params.put("entityType", "table");
     params.put("fqn", "db.schema.test_table");
     params.put("patch", "[]");
 
-    try (MockedStatic<Entity> entityMock = mockStatic(Entity.class);
-        MockedStatic<McpChangeEventUtil> changeEventMock = mockStatic(McpChangeEventUtil.class);
-        MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class)) {
+    // Inject functional interfaces — no mockStatic(Entity.class) needed
+    McpEntityBridge.EntityReferenceResolver referenceResolver =
+        (entityType, fqn, include) -> entityRef;
+    McpEntityBridge.PatchAuthorizer noOpAuthorizer = (entityType, jsonPatch, fqn1) -> {};
+    McpEntityBridge.RepositoryProvider repoProvider = (entityType) -> mockRepo;
+    McpEntityBridge.ChangeEventPublisher noOpPublisher = (entity, changeType, userName) -> {};
 
-      entityMock.when(() -> Entity.getEntityRepository("table")).thenReturn(mockRepo);
-      jsonMock.when(() -> JsonUtils.convertValue(any(), eq(Map.class))).thenReturn(Map.of());
+    try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class)) {
+      jsonMock
+          .when(() -> JsonUtils.convertValue(any(), eq(Map.class)))
+          .thenReturn(Map.of("status", "OK"));
 
-      new PatchEntityTool().execute(authorizer, securityContext, params);
-
-      ArgumentCaptor<String> impersonatedByCaptor = ArgumentCaptor.forClass(String.class);
-      verify(mockRepo)
-          .patch(
-              isNull(),
-              any(String.class),
-              eq("alice"),
-              any(),
-              eq(ChangeSource.MANUAL),
-              isNull(),
-              impersonatedByCaptor.capture());
-
-      assertThat(impersonatedByCaptor.getValue())
-          .as("impersonatedBy must be null when ImpersonationContext is not set")
-          .isNull();
+      new PatchEntityTool()
+          .execute(
+              params,
+              securityContext,
+              referenceResolver,
+              noOpAuthorizer,
+              repoProvider,
+              noOpPublisher);
     }
+
+    ArgumentCaptor<String> impersonatedByCaptor = ArgumentCaptor.forClass(String.class);
+    verify(mockRepo)
+        .patch(
+            isNull(),
+            any(String.class),
+            eq("alice"),
+            any(),
+            eq(ChangeSource.MANUAL),
+            isNull(),
+            impersonatedByCaptor.capture());
+
+    assertThat(impersonatedByCaptor.getValue())
+        .as("impersonatedBy must be null when ImpersonationContext is not set")
+        .isNull();
   }
 
   @Test
@@ -150,43 +186,85 @@ class PatchEntityToolTest {
     when(mockRepo.patch(any(), any(String.class), any(), any(), any(), any(), any()))
         .thenReturn(patchResponse);
 
+    EntityReference entityRef = mock(EntityReference.class);
+    when(entityRef.getFullyQualifiedName()).thenReturn("db.schema.test_table");
+
     Map<String, Object> params = new HashMap<>();
     params.put("entityType", "table");
     params.put("fqn", "db.schema.test_table");
     params.put("patch", "[]");
 
-    try (MockedStatic<Entity> entityMock = mockStatic(Entity.class);
-        MockedStatic<McpChangeEventUtil> changeEventMock = mockStatic(McpChangeEventUtil.class);
-        MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class)) {
+    // Capture change event publication
+    AtomicReference<EntityInterface> capturedEntity = new AtomicReference<>();
+    AtomicReference<EventType> capturedChangeType = new AtomicReference<>();
+    AtomicReference<String> capturedUserName = new AtomicReference<>();
 
-      entityMock.when(() -> Entity.getEntityRepository("table")).thenReturn(mockRepo);
-      jsonMock.when(() -> JsonUtils.convertValue(any(), eq(Map.class))).thenReturn(Map.of());
+    McpEntityBridge.EntityReferenceResolver referenceResolver =
+        (entityType, fqn, include) -> entityRef;
+    McpEntityBridge.PatchAuthorizer noOpAuthorizer = (entityType, jsonPatch, fqn1) -> {};
+    McpEntityBridge.RepositoryProvider repoProvider = (entityType) -> mockRepo;
+    McpEntityBridge.ChangeEventPublisher capturingPublisher =
+        (entity, changeType, userName) -> {
+          capturedEntity.set(entity);
+          capturedChangeType.set(changeType);
+          capturedUserName.set(userName);
+        };
 
-      new PatchEntityTool().execute(authorizer, securityContext, params);
+    try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class)) {
+      jsonMock
+          .when(() -> JsonUtils.convertValue(any(), eq(Map.class)))
+          .thenReturn(Map.of("status", "OK"));
 
-      changeEventMock.verify(
-          () ->
-              McpChangeEventUtil.publishChangeEvent(
-                  eq(mockEntity), eq(EventType.ENTITY_UPDATED), eq("alice")));
+      new PatchEntityTool()
+          .execute(
+              params,
+              securityContext,
+              referenceResolver,
+              noOpAuthorizer,
+              repoProvider,
+              capturingPublisher);
     }
+
+    assertThat(capturedEntity.get()).isSameAs(mockEntity);
+    assertThat(capturedChangeType.get()).isEqualTo(EventType.ENTITY_UPDATED);
+    assertThat(capturedUserName.get()).isEqualTo("alice");
   }
 
   @Test
   void execute_nullPatch_throwsIllegalArgumentException() {
+    EntityReference entityRef = mock(EntityReference.class);
+    when(entityRef.getFullyQualifiedName()).thenReturn("db.schema.test_table");
+
     Map<String, Object> params = new HashMap<>();
     params.put("entityType", "table");
     params.put("fqn", "db.schema.test_table");
     params.put("patch", null);
 
-    assertThatThrownBy(() -> new PatchEntityTool().execute(authorizer, securityContext, params))
+    // Inject functional interfaces — no mockStatic(Entity.class) needed
+    McpEntityBridge.EntityReferenceResolver referenceResolver =
+        (entityType, fqn, include) -> entityRef;
+    McpEntityBridge.PatchAuthorizer noOpAuthorizer = (entityType, jsonPatch, fqn1) -> {};
+    McpEntityBridge.RepositoryProvider repoProvider =
+        (entityType) -> mock(org.openmetadata.service.jdbi3.EntityRepository.class);
+    McpEntityBridge.ChangeEventPublisher noOpPublisher = (entity, changeType, userName) -> {};
+
+    assertThatThrownBy(
+            () ->
+                new PatchEntityTool()
+                    .execute(
+                        params,
+                        securityContext,
+                        referenceResolver,
+                        noOpAuthorizer,
+                        repoProvider,
+                        noOpPublisher))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Patch cannot be null or empty");
   }
 
   @Test
   void execute_withLimits_throwsUnsupportedOperationException() {
-    assertThatThrownBy(
-            () -> new PatchEntityTool().execute(authorizer, null, securityContext, Map.of()))
+    assertThatThrownBy(() -> new PatchEntityTool().execute(null, null, securityContext, Map.of()))
         .isInstanceOf(UnsupportedOperationException.class);
   }
 }

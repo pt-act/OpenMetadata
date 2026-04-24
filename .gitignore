@@ -193,6 +193,10 @@ memory
 ingestion/.claude/agents
 .claustre_session_id
 
+# AI agent memory bank — local working context, never committed
+.agents/
+specs/
+
 # AI scaffold working documents — stay local, never committed
 **/CONNECTOR_CONTEXT.md
 
