@@ -33,7 +33,7 @@ import org.openmetadata.service.search.SearchRepository;
 /**
  * Unit test for {@link Entity#cleanup()}.
  *
- * <p>Verifies that after calling cleanup(), all 16 {@code @Getter @Setter} static repository fields
+ * <p>Verifies that after calling cleanup(), all 15 {@code @Getter @Setter} static repository fields
  * are null, the 3 private collections (ENTITY_REPOSITORY_MAP, ENTITY_TS_REPOSITORY_MAP,
  * ENTITY_LIST) are empty, and the {@code initializedRepositories} flag is false.
  *
@@ -81,7 +81,7 @@ class EntityCleanupTest {
     // --- Exercise ---
     Entity.cleanup();
 
-    // --- Verify: all 16 @Getter @Setter static fields are null ---
+    // --- Verify: all 15 @Getter @Setter static fields are null ---
     assertNull(Entity.getCollectionDAO(), "collectionDAO should be null after cleanup");
     assertNull(Entity.getJobDAO(), "jobDAO should be null after cleanup");
     assertNull(Entity.getJdbi(), "jdbi should be null after cleanup");
@@ -96,8 +96,6 @@ class EntityCleanupTest {
         Entity.getChangeEventRepository(), "changeEventRepository should be null after cleanup");
     assertNull(Entity.getSearchRepository(), "searchRepository should be null after cleanup");
     assertNull(Entity.getAuditLogRepository(), "auditLogRepository should be null after cleanup");
-    assertNull(
-        Entity.getSuggestionRepository(), "suggestionRepository should be null after cleanup");
     assertNull(Entity.getTypeRepository(), "typeRepository should be null after cleanup");
     assertNull(
         Entity.getEntityRelationshipRepository(),

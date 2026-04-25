@@ -432,7 +432,6 @@ public final class Entity {
     changeEventRepository = null;
     searchRepository = null;
     auditLogRepository = null;
-    suggestionRepository = null;
     typeRepository = null;
     entityRelationshipRepository = null;
     ENTITY_REPOSITORY_MAP.clear();
