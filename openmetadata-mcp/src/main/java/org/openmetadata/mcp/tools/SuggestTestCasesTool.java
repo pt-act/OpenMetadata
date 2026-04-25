@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.openmetadata.schema.entity.data.Table;
@@ -717,13 +718,41 @@ public class SuggestTestCasesTool implements McpTool {
     return "<#E::table::" + fqn + ">";
   }
 
-  /** Generates a template RI SQL query for FK columns. */
+  /** Pattern for validating FQN components (alphanumeric, underscores, dots). */
+  private static final Pattern FQN_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\.]+$");
+
+  /** Pattern for validating SQL identifier names. */
+  private static final Pattern SQL_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z0-9_]+$");
+
+  /**
+   * Generates a template RI SQL query for FK columns.
+   *
+   * @param fqn Fully qualified name (e.g., "database.schema.table")
+   * @param fkColumns List of foreign key column names
+   * @return SQL query string for referential integrity testing
+   * @throws IllegalArgumentException if fqn or column names contain invalid characters
+   */
   @VisibleForTesting
   static String buildRISql(String fqn, List<String> fkColumns) {
+    // Validate FQN format to prevent SQL injection
+    if (fqn == null || !FQN_PATTERN.matcher(fqn).matches()) {
+      throw new IllegalArgumentException(
+          "Invalid FQN format. Only alphanumeric characters, underscores, and dots allowed: " + fqn);
+    }
+
+    // Validate column names to prevent SQL injection
+    for (String col : fkColumns) {
+      if (col == null || !SQL_IDENTIFIER_PATTERN.matcher(col).matches()) {
+        throw new IllegalArgumentException(
+            "Invalid column name. Only alphanumeric characters and underscores allowed: " + col);
+      }
+    }
+
+    String safeFqn = fqn.replace(".", "_");
     String columnList = String.join(", ", fkColumns);
     return String.format(
         "SELECT * FROM %s WHERE %s IS NULL OR %s NOT IN (SELECT DISTINCT %s FROM referenced_table)",
-        fqn.replace(".", "_"), columnList, columnList, columnList);
+        safeFqn, columnList, columnList, columnList);
   }
 
   /** Escapes special characters for JSON string values. */
