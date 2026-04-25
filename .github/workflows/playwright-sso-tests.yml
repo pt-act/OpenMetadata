@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: ${{ github.event_name == 'pull_request_target' && fromJSON('["mock-oidc"]') || github.event.inputs.sso_provider && fromJSON(format('["{0}"]', github.event.inputs.sso_provider)) || fromJSON('["mock-oidc"]') }}
+        provider: ${{ github.event_name == 'pull_request_target' && fromJSON('[{"name":"mock-oidc","env_prefix":"MOCK_OIDC"}]') || fromJSON(format('[{{"name":"{0}","env_prefix":"{1}"}}]', github.event.inputs.sso_provider, github.event.inputs.sso_provider == 'mock-oidc' && 'MOCK_OIDC' || github.event.inputs.sso_provider == 'google' && 'GOOGLE' || github.event.inputs.sso_provider == 'okta' && 'OKTA' || github.event.inputs.sso_provider == 'azure' && 'AZURE' || github.event.inputs.sso_provider == 'auth0' && 'AUTH0' || github.event.inputs.sso_provider == 'saml' && 'SAML' || github.event.inputs.sso_provider == 'cognito' && 'COGNITO' || 'UNKNOWN')) || fromJSON('[{"name":"mock-oidc","env_prefix":"MOCK_OIDC"}]') }}
 
     steps:
       - name: Free Disk Space (Ubuntu)
@@ -127,7 +127,7 @@ jobs:
             ${{ runner.os }}-maven-
 
       - name: Start Mock OIDC Provider
-        if: ${{ matrix.provider == 'mock-oidc' }}
+        if: ${{ matrix.provider.name == 'mock-oidc' }}
         run: |
           cd docker/development
           docker compose --profile sso-test build mock-oidc-provider
@@ -177,7 +177,7 @@ jobs:
         run: npx playwright@1.51.1 install chromium webkit --with-deps
 
       - name: Run Mock OIDC Authentication Tests
-        if: ${{ matrix.provider == 'mock-oidc' }}
+        if: ${{ matrix.provider.name == 'mock-oidc' }}
         working-directory: openmetadata-ui/src/main/resources/ui
         run: npx playwright test --config=playwright.sso.config.ts --workers=1
         env:
@@ -187,13 +187,13 @@ jobs:
         timeout-minutes: 60
 
       - name: Run SSO Authentication Tests
-        if: ${{ matrix.provider != 'mock-oidc' }}
+        if: ${{ matrix.provider.name != 'mock-oidc' }}
         working-directory: openmetadata-ui/src/main/resources/ui
         run: npx playwright test --config=playwright.sso.config.ts --workers=1
         env:
-          SSO_PROVIDER_TYPE: ${{ matrix.provider }}
-          SSO_USERNAME: ${{ secrets[format('{0}_SSO_USERNAME', toUpper(matrix.provider))] }}
-          SSO_PASSWORD: ${{ secrets[format('{0}_SSO_PASSWORD', toUpper(matrix.provider))] }}
+          SSO_PROVIDER_TYPE: ${{ matrix.provider.name }}
+          SSO_USERNAME: ${{ secrets[format('{0}_SSO_USERNAME', matrix.provider.env_prefix)] }}
+          SSO_PASSWORD: ${{ secrets[format('{0}_SSO_PASSWORD', matrix.provider.env_prefix)] }}
           PLAYWRIGHT_IS_OSS: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         timeout-minutes: 60
@@ -202,7 +202,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sso-auth-test-results-${{ matrix.provider }}
+          name: sso-auth-test-results-${{ matrix.provider.name }}
           path: |
             openmetadata-ui/src/main/resources/ui/playwright/output/sso-playwright-report
             openmetadata-ui/src/main/resources/ui/playwright/output/sso-test-results
