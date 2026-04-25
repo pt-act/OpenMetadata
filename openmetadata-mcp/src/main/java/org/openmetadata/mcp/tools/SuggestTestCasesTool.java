@@ -737,7 +737,8 @@ public class SuggestTestCasesTool implements McpTool {
     // Validate FQN format to prevent SQL injection
     if (fqn == null || !FQN_PATTERN.matcher(fqn).matches()) {
       throw new IllegalArgumentException(
-          "Invalid FQN format. Only alphanumeric characters, underscores, and dots allowed: " + fqn);
+          "Invalid FQN format. Only alphanumeric characters, underscores, and dots allowed: "
+              + fqn);
     }
 
     // Validate column names to prevent SQL injection

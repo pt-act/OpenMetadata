@@ -2,8 +2,9 @@
 
 **Date:** April 25, 2026  
 **Auditor:** Community Security Contributor  
-**Scope:** GitHub Actions Workflow Security & Java Source Code  
+**Scope:** GitHub Actions Workflows, Java Backend, Python Ingestion/Framework  
 **Tool:** aikido.dev SAST Scanner  
+**Total Issues:** 111 (110 inherited from upstream, 1 fixed from fork)  
 
 ---
 
@@ -17,12 +18,14 @@ This report documents **34 critical security vulnerabilities** detected in the O
 |----------|-------|----------|--------|--------|
 | Unsafe `pull_request_target` Usage | 23 | Critical | Inherited | Upstream |
 | Template Injection in Workflows | 11 | Critical | Inherited | Upstream |
-| SQL/SPARQL Injection | 46 | Critical/High | 45 Inherited + **1 Fork** | Mixed |
-| **Total Issues** | **80** | **Critical/High** | **79 Inherited + 1 Fixed** | — |
+| Java SQL/SPARQL Injection | 46 | Critical/High | 45 Inherited + **1 Fork** | Mixed |
+| Python SQL Injection (Ingestion) | 28 | Critical/High | Inherited | Upstream |
+| XML Parsing Vulnerabilities (XXE) | 3 | Critical/High | Inherited | Upstream |
+| **Total Issues** | **111** | **Critical/High** | **110 Inherited + 1 Fixed** | — |
 
 ---
 
-> **Note on SQL/SPARQL Injection:** 46 additional issues were identified. 45 are inherited from upstream; **1 issue in `SuggestTestCasesTool.java` originated from this fork and has been fixed.**
+> **Note on SQL Injection:** 74 total injection issues were identified (46 Java + 28 Python). 73 are inherited from upstream; **1 issue in `SuggestTestCasesTool.java` originated from this fork and has been fixed.**
 
 ---
 
@@ -217,9 +220,158 @@ The MCP benchmarking implementation added to this fork:
 | Template injection | `py-cli-e2e-tests.yml` | Review debug logging |
 | Template injection | `git-create-release-branch.yml` | Add input validation |
 
+### Low Priority (P3)
+
+| Issue | Count | Action |
+|-------|-------|--------|
+| Python SQL injection (ingestion framework) | 28 files | Review and parameterize queries in ingestion sources |
+
 ---
 
-## 5. Security Best Practices for GitHub Actions
+## 5. Python SQL Injection in Ingestion Framework (28 Issues)
+
+### 5.1 Overview
+
+Additional SAST scanning identified **28 SQL injection vulnerabilities** in the Python-based metadata ingestion framework. These are all inherited from the upstream OpenMetadata repository.
+
+### 5.2 Affected Components
+
+| Component | Files | Description |
+|-----------|-------|-------------|
+| **Database Sources** | 15 files | SQL query construction for metadata extraction from various databases |
+| **Data Quality** | 1 file | Custom SQL validation queries |
+| **Dashboard Sources** | 1 file | Chart/metadata queries |
+
+### 5.3 Critical Issues
+
+| File | Line | Vulnerable Pattern | Risk |
+|------|------|-------------------|------|
+| `hive/metastore_dialects/mysql/dialect.py` | 78 | `AND tbsl.TBL_NAME = '{table_name}'` | String formatting with f-strings |
+| `oracle/utils.py` | 316 | `sql.text(GET_VIEW_NAMES.format(...))` | SQLAlchemy text with format |
+| `postgres/pgspider/lineage.py` | 54 | `conn.execute(text(sql))` | Direct SQL execution |
+| `snowflake/utils.py` | 307, 320, 651 | `text(query.format(**parameters))` | Multiple format injections |
+| `vertica/metadata.py` | 88-92, 96-100, 246-250 | `VERTICA_GET_COLUMNS.format(...)` | Vertica metadata queries |
+| `domodatabase/metadata.py` | 233 | `f'SELECT * FROM "{table_name}"'` | f-string table reference |
+
+### 5.4 High Issues
+
+| File | Count | Description |
+|------|-------|-------------|
+| `oracle/utils.py` | 4 | Materialized view and database link queries |
+| `redshift/incremental_table_processor.py` | 1 | Table changes query with date parameters |
+| `snowflake/utils.py` | 3 | View DDL, stream definition, and schema queries |
+| `sql_column_handler.py` | 1 | Column sampling queries |
+| `starrocks/metadata.py` | 1 | Metadata queries |
+| `trino/metadata.py` | 1 | Connection execution |
+| `doris/metadata.py` | 2 | Column and partition queries |
+| `hive/metastore_dialects/postgres/dialect.py` | 1 | Postgres metastore dialect |
+| `tableCustomSQLQuery.py` | 1 | Data quality custom SQL |
+| `superset/mixin.py` | 1 | Dashboard chart queries |
+
+### 5.5 Recommended Remediations
+
+For Python SQLAlchemy-based code:
+
+```python
+# ❌ VULNERABLE:
+query = f"SELECT * FROM {table_name} WHERE id = {user_id}"
+result = conn.execute(text(query))
+
+# ✅ SECURE - Use SQLAlchemy parameters:
+query = "SELECT * FROM :table_name WHERE id = :user_id"
+result = conn.execute(text(query), {"table_name": table_name, "user_id": user_id})
+
+# ✅ ALTERNATIVE - Use SQLAlchemy Core with proper quoting:
+from sqlalchemy import select, Table, MetaData
+metadata = MetaData()
+table = Table(table_name, metadata, autoload_with=engine)
+stmt = select(table).where(table.c.id == user_id)
+result = conn.execute(stmt)
+```
+
+### 5.6 Context
+
+These SQL injection issues primarily affect:
+- **Metadata extraction** from source databases (read-only operations)
+- **Data quality testing** (custom SQL execution)
+- **Database schema introspection**
+
+While concerning, these are often in **controlled contexts** where:
+- Table names come from database catalogs, not direct user input
+- Connections use read-only credentials in many cases
+- Exploitation requires control of the source database or ingestion configuration
+
+However, defense-in-depth principles still apply, especially for:
+- Multi-tenant deployments
+- Custom SQL data quality tests
+- Ingestion from untrusted sources
+
+---
+
+## 6. XML External Entity (XXE) Vulnerabilities (3 Issues)
+
+### 6.1 Overview
+
+Additional SAST scanning identified **3 XML parsing vulnerabilities** using Python's standard library `xml.etree.ElementTree`. These parsers are vulnerable to XXE (XML External Entity) attacks when processing untrusted XML data.
+
+### 6.2 Affected Files
+
+| File | Line | Severity | Vulnerable Code | Risk |
+|------|------|----------|-----------------|------|
+| `ingestion/src/metadata/ingestion/source/dashboard/ssrs/rdl_parser.py` | 69 | **Critical** | `ET.fromstring(rdl_bytes)` | Parses SSRS RDL (Report Definition Language) files |
+| `ingestion/src/metadata/ingestion/source/database/saphana/cdata_parser.py` | 741 | High | `ET.fromstring(cdata)` | Parses SAP HANA CDATA metadata |
+| `scripts/jacoco_diff_coverage.py` | 128 | High | `ET.parse(report_path).getroot()` | Parses JaCoCo coverage reports |
+
+### 6.3 Risk Description
+
+XXE attacks can allow:
+- **File disclosure** (reading arbitrary files from the server)
+- **Server-Side Request Forgery (SSRF)** (making HTTP requests from the server)
+- **Denial of Service** (via billion laughs / exponential entity expansion)
+
+### 6.4 Context and Exploitability
+
+| File | Context | Risk Level |
+|------|---------|------------|
+| **ssrs/rdl_parser.py** | Parses SSRS report definitions from external systems | **High** - RDL files from external sources could be malicious |
+| **saphana/cdata_parser.py** | Parses CDATA from SAP HANA database metadata | Medium - Typically from controlled database sources |
+| **jacoco_diff_coverage.py** | Parses JaCoCo XML coverage reports | Low - Usually from internal CI artifacts |
+
+### 6.5 Recommended Remediations
+
+Replace `xml.etree.ElementTree` with **`defusedxml`** library:
+
+```python
+# ❌ VULNERABLE:
+import xml.etree.ElementTree as ET
+root = ET.fromstring(untrusted_xml_data)
+tree = ET.parse(file_path)
+
+# ✅ SECURE - Use defusedxml:
+from defusedxml import ElementTree as ET
+root = ET.fromstring(untrusted_xml_data)  # Safe from XXE
+tree = ET.parse(file_path)  # Safe from XXE
+```
+
+**Installation:**
+```bash
+pip install defusedxml
+```
+
+**Alternative for Python 3.9+** (if defusedxml is not available):
+```python
+import xml.etree.ElementTree as ET
+
+# Disable external entity resolution (not foolproof)
+parser = ET.XMLParser(resolve_entities=False)
+root = ET.fromstring(untrusted_xml_data, parser=parser)
+```
+
+> **Note:** The `resolve_entities=False` parameter is not available in all Python versions and does not protect against all XXE variants. `defusedxml` is strongly recommended.
+
+---
+
+## 7. Security Best Practices for GitHub Actions
 
 ### Recommended Workflow Structure
 
@@ -261,9 +413,15 @@ jobs:
 
 ---
 
-## 6. Conclusion
+## 8. Conclusion
 
-**80 security vulnerabilities** were identified (34 workflow + 46 SQL/SPARQL injection). **79 are inherited from upstream**. The MCP benchmarking implementation introduced **1 SQL injection issue** in `SuggestTestCasesTool.java`, which has been **fixed** with proper input validation. Workflow modifications follow security best practices by using the safer `pull_request` trigger.
+**111 security vulnerabilities** were identified:
+- 34 workflow security issues
+- 46 Java SQL/SPARQL injection issues  
+- 28 Python SQL injection issues (ingestion framework)
+- 3 XML XXE vulnerabilities (Python ingestion)
+
+**110 are inherited from upstream**. The MCP benchmarking implementation introduced **1 SQL injection issue** in `SuggestTestCasesTool.java`, which has been **fixed** with proper input validation. Workflow modifications follow security best practices by using the safer `pull_request` trigger.
 
 ### Recommendation
 
@@ -273,6 +431,14 @@ The OpenMetadata maintainers should:
 2. **Audit `pull_request_target` usage** to determine which workflows actually require elevated permissions
 3. **Implement a security review process** for new workflow additions
 4. **Consider adding GitHub Advanced Security** or similar SAST tools to CI pipeline
+5. **Review Python ingestion framework** for SQL injection risks, especially in:
+   - Database source connectors (Snowflake, Oracle, Vertica, etc.)
+   - Data quality custom SQL execution paths
+   - Multi-tenant deployment scenarios
+6. **Address XML XXE vulnerabilities** by migrating to `defusedxml`:
+   - `ingestion/src/metadata/ingestion/source/dashboard/ssrs/rdl_parser.py` (Critical)
+   - `ingestion/src/metadata/ingestion/source/database/saphana/cdata_parser.py`
+   - Add `defusedxml` as a project dependency
 
 ---
 
@@ -393,6 +559,27 @@ static String buildRISql(String fqn, List<String> fkColumns) {
 - `.github/workflows/docker-openmetadata-server.yml`
 - `.github/workflows/git-create-release-branch.yml`
 - `.github/workflows/py-cli-e2e-tests.yml`
+
+### Files with Python SQL Injection (28)
+- `ingestion/src/metadata/ingestion/source/database/hive/metastore_dialects/mysql/dialect.py`
+- `ingestion/src/metadata/ingestion/source/database/hive/metastore_dialects/postgres/dialect.py`
+- `ingestion/src/metadata/ingestion/source/database/oracle/utils.py` (4 issues)
+- `ingestion/src/metadata/ingestion/source/database/postgres/pgspider/lineage.py`
+- `ingestion/src/metadata/ingestion/source/database/snowflake/utils.py` (6 issues)
+- `ingestion/src/metadata/ingestion/source/database/vertica/metadata.py` (3 issues)
+- `ingestion/src/metadata/ingestion/source/database/domodatabase/metadata.py`
+- `ingestion/src/metadata/ingestion/source/database/doris/metadata.py` (2 issues)
+- `ingestion/src/metadata/ingestion/source/database/redshift/incremental_table_processor.py`
+- `ingestion/src/metadata/ingestion/source/database/starrocks/metadata.py`
+- `ingestion/src/metadata/ingestion/source/database/trino/metadata.py`
+- `ingestion/src/metadata/ingestion/source/database/sql_column_handler.py`
+- `ingestion/src/metadata/ingestion/source/dashboard/superset/mixin.py`
+- `ingestion/src/metadata/data_quality/validations/table/sqlalchemy/tableCustomSQLQuery.py`
+
+### Files with XML XXE Vulnerabilities (3)
+- `ingestion/src/metadata/ingestion/source/dashboard/ssrs/rdl_parser.py` (Critical)
+- `ingestion/src/metadata/ingestion/source/database/saphana/cdata_parser.py` (High)
+- `scripts/jacoco_diff_coverage.py` (High)
 
 ---
 
