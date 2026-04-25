@@ -192,8 +192,8 @@ jobs:
         run: npx playwright test --config=playwright.sso.config.ts --workers=1
         env:
           SSO_PROVIDER_TYPE: ${{ matrix.provider }}
-          SSO_USERNAME: ${{ secrets[format('{0}_SSO_USERNAME', uppercase(matrix.provider))] }}
-          SSO_PASSWORD: ${{ secrets[format('{0}_SSO_PASSWORD', uppercase(matrix.provider))] }}
+          SSO_USERNAME: ${{ secrets[format('{0}_SSO_USERNAME', toUpper(matrix.provider))] }}
+          SSO_PASSWORD: ${{ secrets[format('{0}_SSO_PASSWORD', toUpper(matrix.provider))] }}
           PLAYWRIGHT_IS_OSS: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         timeout-minutes: 60

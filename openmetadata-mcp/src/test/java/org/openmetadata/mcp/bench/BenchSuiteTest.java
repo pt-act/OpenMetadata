@@ -721,12 +721,15 @@ class BenchSuiteTest {
     @Test
     void liveClient_withApiKey_selectsTools() {
       if (!isLiveBenchEnabled()) {
-        org.junit.jupiter.api.Assumptions.assumeTrue(false, "Set OPENAI_API_KEY and bench.live=true to run live tests");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+            false, "Set OPENAI_API_KEY and bench.live=true to run live tests");
         return;
       }
 
       OpenAiCompatibleLlmClient liveClient = new OpenAiCompatibleLlmClient();
-      List<String> tools = liveClient.selectTools("Find tables owned by marketing", BenchRunner.defaultAvailableTools());
+      List<String> tools =
+          liveClient.selectTools(
+              "Find tables owned by marketing", BenchRunner.defaultAvailableTools());
 
       assertThat(tools).isNotEmpty();
       assertThat(tools).contains("search_metadata");
@@ -735,7 +738,8 @@ class BenchSuiteTest {
     @Test
     void liveClient_runAllFixtures_generatesReport() {
       if (!isLiveBenchEnabled()) {
-        org.junit.jupiter.api.Assumptions.assumeTrue(false, "Set OPENAI_API_KEY and bench.live=true to run live tests");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+            false, "Set OPENAI_API_KEY and bench.live=true to run live tests");
         return;
       }
 

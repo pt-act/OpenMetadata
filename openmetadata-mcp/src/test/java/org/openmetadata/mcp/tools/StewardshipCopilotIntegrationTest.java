@@ -935,8 +935,7 @@ class StewardshipCopilotIntegrationTest {
       String userId = "expired-user";
       // Insert a timestamp that is older than the cooldown
       FindUnownedAssetsTool.USER_LAST_CALL_MS.put(
-          userId,
-          System.currentTimeMillis() - FindUnownedAssetsTool.RATE_LIMIT_COOLDOWN_MS - 5000);
+          userId, System.currentTimeMillis() - FindUnownedAssetsTool.RATE_LIMIT_COOLDOWN_MS - 5000);
       Long result = FindUnownedAssetsTool.tryAcquireRateLimit(userId);
       assertThat(result).isNull();
     }
@@ -958,7 +957,8 @@ class StewardshipCopilotIntegrationTest {
       FindUnownedAssetsTool.USER_LAST_CALL_MS.put("recent-user", now - 1000);
       FindUnownedAssetsTool.evictStaleEntries(now);
       assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).doesNotContainKey("expired-user");
-      assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).containsKey("just-past-user"); // past cooldown but within 2× eviction threshold
+      assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS)
+          .containsKey("just-past-user"); // past cooldown but within 2× eviction threshold
       assertThat(FindUnownedAssetsTool.USER_LAST_CALL_MS).containsKey("recent-user");
     }
 

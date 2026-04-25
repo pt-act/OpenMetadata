@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -49,7 +48,11 @@ public class OpenAiCompatibleLlmClient implements BenchLlmClient {
     this.baseUrl = getEnv("OPENAI_BASE_URL", DEFAULT_BASE_URL);
     this.model = getEnv("OPENAI_MODEL", DEFAULT_MODEL);
     this.maxCostUsd = getEnvDouble("MAX_BENCH_COST_USD", DEFAULT_MAX_COST_USD);
-    this.httpClient = new OkHttpClient.Builder().connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS).readTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build();
+    this.httpClient =
+        new OkHttpClient.Builder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .build();
     this.mapper = new ObjectMapper();
   }
 
@@ -122,7 +125,9 @@ public class OpenAiCompatibleLlmClient implements BenchLlmClient {
             .url(baseUrl)
             .addHeader("Authorization", "Bearer " + apiKey)
             .addHeader("Content-Type", "application/json")
-            .post(RequestBody.create(mapper.writeValueAsString(requestBody), MediaType.parse("application/json")))
+            .post(
+                RequestBody.create(
+                    mapper.writeValueAsString(requestBody), MediaType.parse("application/json")))
             .build();
 
     try (Response response = httpClient.newCall(request).execute()) {
@@ -142,7 +147,8 @@ public class OpenAiCompatibleLlmClient implements BenchLlmClient {
     JsonNode usage = root.get("usage");
     if (usage != null) {
       int promptTokens = usage.has("prompt_tokens") ? usage.get("prompt_tokens").asInt() : 0;
-      int completionTokens = usage.has("completion_tokens") ? usage.get("completion_tokens").asInt() : 0;
+      int completionTokens =
+          usage.has("completion_tokens") ? usage.get("completion_tokens").asInt() : 0;
       // Rough cost estimate: GPT-4o ~$2.50/1M input, $10/1M output
       double cost = (promptTokens * 2.5 / 1_000_000) + (completionTokens * 10.0 / 1_000_000);
       totalCostUsd += cost;
@@ -184,7 +190,10 @@ public class OpenAiCompatibleLlmClient implements BenchLlmClient {
   private void checkCostGuard() {
     if (totalCostUsd >= maxCostUsd) {
       throw new IllegalStateException(
-          "Cost guard exceeded: $" + String.format("%.2f", totalCostUsd) + " >= $" + maxCostUsd
+          "Cost guard exceeded: $"
+              + String.format("%.2f", totalCostUsd)
+              + " >= $"
+              + maxCostUsd
               + ". Set MAX_BENCH_COST_USD to increase limit.");
     }
   }
