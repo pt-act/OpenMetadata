@@ -32,7 +32,7 @@ import org.mockito.quality.Strictness;
 import org.openmetadata.schema.search.SearchRequest;
 import org.openmetadata.schema.utils.JsonUtils;
 import org.openmetadata.service.search.SearchRepository;
-import org.openmetadata.service.search.SearchUtil;
+import org.openmetadata.service.search.SearchUtils;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.DefaultAuthorizer;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
@@ -149,7 +149,7 @@ class GovernanceCoverageScannerIntegrationTest {
   private void setupScannerMocks(
       MockedStatic<JsonUtils> jsonMock,
       MockedStatic<DefaultAuthorizer> authorizerMock,
-      MockedStatic<SearchUtil> searchUtilMock,
+      MockedStatic<SearchUtils> searchUtilMock,
       SearchRepository searchRepo,
       SubjectContext subjectContext,
       com.fasterxml.jackson.databind.JsonNode searchNode) {
@@ -159,7 +159,7 @@ class GovernanceCoverageScannerIntegrationTest {
         .thenReturn(subjectContext);
 
     searchUtilMock
-        .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+        .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
         .thenReturn("table_index");
 
     // Use pre-computed node to avoid UnfinishedStubbing issues
@@ -232,9 +232,9 @@ class GovernanceCoverageScannerIntegrationTest {
             .thenReturn(mockTotalResp, mockPresentResp, mockMissingResp);
 
         try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
-            MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+            MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
           searchUtilMock
-              .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+              .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
               .thenReturn("table_index");
           // Identity function: return the input map as-is so each response flows through
           jsonMock
@@ -261,7 +261,7 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupScannerMocks(
             jsonMock,
@@ -303,7 +303,7 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupScannerMocks(
             jsonMock,
@@ -346,7 +346,7 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupScannerMocks(
             jsonMock,
@@ -488,10 +488,10 @@ class GovernanceCoverageScannerIntegrationTest {
       when(mockResponse.getEntity()).thenReturn(searchResponse);
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class);
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class)) {
         searchUtilMock
-            .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+            .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
             .thenReturn("table_index");
         jsonMock
             .when(() -> JsonUtils.convertValue(any(), eq(Map.class)))
@@ -539,10 +539,10 @@ class GovernanceCoverageScannerIntegrationTest {
       when(mockResponse.getEntity()).thenReturn(searchResponse);
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class);
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class)) {
         searchUtilMock
-            .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+            .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
             .thenReturn("table_index");
         jsonMock
             .when(() -> JsonUtils.convertValue(any(), eq(Map.class)))
@@ -592,10 +592,10 @@ class GovernanceCoverageScannerIntegrationTest {
       when(mockResponse.getEntity()).thenReturn(searchResponse);
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class);
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class)) {
         searchUtilMock
-            .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+            .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
             .thenReturn("table_index");
         jsonMock
             .when(() -> JsonUtils.convertValue(any(), eq(Map.class)))
@@ -778,7 +778,7 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupScannerMocks(
             jsonMock,
@@ -923,7 +923,7 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupScannerMocks(
             jsonMock,
@@ -981,7 +981,7 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupScannerMocks(
             jsonMock,
@@ -1023,13 +1023,13 @@ class GovernanceCoverageScannerIntegrationTest {
 
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         authorizerMock
             .when(() -> DefaultAuthorizer.getSubjectContext(ctxB))
             .thenReturn(subjectContext);
         searchUtilMock
-            .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+            .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
             .thenReturn("table_index");
         jsonMock.when(() -> JsonUtils.readTree(anyString())).thenReturn(TOTAL_10_SEARCH_NODE);
 

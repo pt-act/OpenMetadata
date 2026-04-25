@@ -128,30 +128,7 @@ Groups 5–11 are standalone and can be reviewed independently once groups 1–4
 
 CI workflow: [`.github/workflows/compile-and-mcp-tests.yml`](.github/workflows/compile-and-mcp-tests.yml)
 
-¹ *908 includes OAuth integration tests, unit tests, and bench infrastructure not shown in this top-10 summary.*
-
----
-
-## Live LLM Benchmark
-
-The deterministic client proves tools *can* be selected correctly. To validate against real models:
-
-```bash
-# Set your OpenAI API key
-export OPENAI_API_KEY=sk-...
-
-# Optional: configure model and cost guard
-export OPENAI_MODEL=gpt-4o              # default: gpt-4o
-export OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions  # default
-export MAX_BENCH_COST_USD=1.0           # default: $1.00
-
-# Run live benchmark
-mvn test -pl :openmetadata-mcp -Dtest=BenchSuiteTest -Dbench.live=true
-```
-
-Results are written to `target/bench-report.live.md` with per-fixture tool selection accuracy and total API cost.
-
-**Supported providers:** OpenAI, Azure OpenAI, Ollama, or any OpenAI-compatible endpoint (set `OPENAI_BASE_URL`).
+¹ *906 includes OAuth integration tests, unit tests, and bench infrastructure not shown in this top-10 summary.*
 
 ---
 

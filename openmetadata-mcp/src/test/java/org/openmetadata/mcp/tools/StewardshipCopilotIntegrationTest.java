@@ -35,7 +35,7 @@ import org.openmetadata.schema.type.EventType;
 import org.openmetadata.schema.utils.JsonUtils;
 import org.openmetadata.service.jdbi3.ChangeEventRepository;
 import org.openmetadata.service.search.SearchRepository;
-import org.openmetadata.service.search.SearchUtil;
+import org.openmetadata.service.search.SearchUtils;
 import org.openmetadata.service.security.Authorizer;
 import org.openmetadata.service.security.DefaultAuthorizer;
 import org.openmetadata.service.security.auth.CatalogSecurityContext;
@@ -143,7 +143,7 @@ class StewardshipCopilotIntegrationTest {
       MockedStatic<JsonUtils> jsonMock,
       MockedStatic<SearchMetadataTool> searchToolMock,
       MockedStatic<DefaultAuthorizer> authorizerMock,
-      MockedStatic<SearchUtil> searchUtilMock,
+      MockedStatic<SearchUtils> searchUtilMock,
       SearchRepository searchRepo,
       SubjectContext subjectContext) {
 
@@ -152,7 +152,7 @@ class StewardshipCopilotIntegrationTest {
         .thenReturn(subjectContext);
 
     searchUtilMock
-        .when(() -> SearchUtil.mapEntityTypesToIndexNames(anyString()))
+        .when(() -> SearchUtils.mapEntityTypesToIndexNames(anyString()))
         .thenReturn("table_index");
 
     jsonMock.when(() -> JsonUtils.readTree(anyString())).thenReturn(EMPTY_SEARCH_NODE);
@@ -193,7 +193,7 @@ class StewardshipCopilotIntegrationTest {
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<SearchMetadataTool> searchToolMock = mockStatic(SearchMetadataTool.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupFindUnownedMocks(
             jsonMock, searchToolMock, authorizerMock, searchUtilMock, searchRepo, subjectContext);
@@ -222,7 +222,7 @@ class StewardshipCopilotIntegrationTest {
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<SearchMetadataTool> searchToolMock = mockStatic(SearchMetadataTool.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupFindUnownedMocks(
             jsonMock, searchToolMock, authorizerMock, searchUtilMock, searchRepo, subjectContext);
@@ -256,7 +256,7 @@ class StewardshipCopilotIntegrationTest {
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<SearchMetadataTool> searchToolMock = mockStatic(SearchMetadataTool.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupFindUnownedMocks(
             jsonMock, searchToolMock, authorizerMock, searchUtilMock, searchRepo, subjectContext);
@@ -834,7 +834,7 @@ class StewardshipCopilotIntegrationTest {
       try (MockedStatic<JsonUtils> jsonMock = mockStatic(JsonUtils.class);
           MockedStatic<SearchMetadataTool> searchToolMock = mockStatic(SearchMetadataTool.class);
           MockedStatic<DefaultAuthorizer> authorizerMock = mockStatic(DefaultAuthorizer.class);
-          MockedStatic<SearchUtil> searchUtilMock = mockStatic(SearchUtil.class)) {
+          MockedStatic<SearchUtils> searchUtilMock = mockStatic(SearchUtils.class)) {
 
         setupFindUnownedMocks(
             jsonMock, searchToolMock, authorizerMock, searchUtilMock, searchRepo, subjectContext);
