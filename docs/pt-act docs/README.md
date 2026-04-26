@@ -51,20 +51,6 @@
 
 ---
 
-## 🎬 Screencast Requirements
-
-Per hackathon rules: **3-minute recorded demo**
-
-**Script:** [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md)
-
-**Key moments to capture:**
-- 0:00 — Title card with At-a-Glance metrics
-- 0:15 — Live tool demo (search → impact → timeline)
-- 2:15 — Benchmark results (906 tests, 100% pass)
-- 2:45 — Upstream PR links (contribution, not throwaway)
-
----
-
 ## ✅ Pre-Submission Checklist
 
 - [ ] Screencast recorded (3 min max)
