@@ -2,8 +2,7 @@
 
 **Date:** April 25, 2026  
 **Auditor:** Community Security Contributor  
-**Scope:** GitHub Actions Workflows, Java Backend, Python Ingestion/Framework  
-**Tool:** aikido.dev SAST Scanner  
+**Scope:** GitHub Actions Workflows, Java Backend, Python Ingestion/Framework   
 **Total Issues:** 111 (110 inherited from upstream, 1 fixed from fork)  
 
 ---
