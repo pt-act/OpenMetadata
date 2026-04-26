@@ -88,8 +88,8 @@ Summary: What This Means for the Next 2 Days
 │ :30    │ narrative + downstream count                            │ pipelines — ranked by severity."                                             │
 │ 1:30–2 │ incident_timeline on a failing pipeline → chronological │ "Or: what happened to this pipeline? A chronological timeline — upstream     │
 │ :15    │ narrative with RCA events + test failures               │ change at 2am, test failure at 3am, downstream impact by 4am."               │
-│ 2:15–2 │ Flash the bench table (19%→100%, 62 fixtures, 906       │ "Every tool is benchmarked. Before our fixes, tool-selection accuracy was    │
-│ :45    │ tests)                                                  │ 19%. After: 100%. 906 tests, zero failures."                                 │
+│ 2:15–2 │ Flash the bench table (19%→100%, 62 fixtures, 908       │ "Every tool is benchmarked. Before our fixes, tool-selection accuracy was    │
+│ :45    │ tests)                                                  │ 19%. After: 100%. 908 tests, zero failures."                                 │
 │ 2:45–3 │ Show 3 open PRs on open-metadata/OpenMetadata (or the   │ "And it's all upstream-mergeable. Three PRs already open. This isn't a       │
 │ :00    │ PR link)                                                │ hackathon fork — it's a contribution."                                       │
 └────────┴─────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────┘
@@ -101,10 +101,10 @@ What's Done vs. What's Left
 ├───────────────────────────────────────────────────────────────────────┼────────────────────────────────────────┤
 │ README restructured (bench table above fold, trade-offs, PR sequence) │ ✅ Committed (1eaac72c0c)              │
 │ MCP_CHANGELOG.md content absorbed into README                         │ ✅ Done                                │
-│ 906/906 tests verified green                                          │ ✅ Done                                │
+│ 908/908 tests verified green                                          │ ✅ Done                                │
 │ Rate limit implementation committed                                   │ ✅ Done (9fa27ddccc)                   │
 │ Screencast storyboard                                                 │ ✅ Written above                       │
 │ Open upstream draft PRs                                               │ ❌ Not done — needs your push decision │
 │ Record screencast                                                     │ ❌ Not done — needs 
 your recording   
-☐  Final test run to confirm 906/906 green before submission
+☐  Final test run to confirm 908/908 green before submission
