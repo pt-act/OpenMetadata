@@ -10,8 +10,7 @@
 |----------|---------|-------------|
 | [`IMPLEMENTATION_SCOPE.md`](IMPLEMENTATION_SCOPE.md) | **31KB detailed implementation log** — all 24 tools, E1-E11 phases, F1-F8 fixes, refactor notes | Optional deep-dive |
 | [`UPSTREAM_ALIGNMENT.md`](UPSTREAM_ALIGNMENT.md) | **Strategic positioning** — upstream issue alignment, PR strategy, risk assessment | Optional context |
-| [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) | **CI/CD pipeline details**, OAuth security test matrix, validation approach | Optional technical |
-| [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | **3-minute screencast storyboard** — timestamps, narration, recording tips | **Use this for recording!** |
+| [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) | **CI/CD pipeline details**, OAuth security test matrix, validation approach 
 | [`HACKATHON_TIMELINE.md`](HACKATHON_TIMELINE.md) | **Timeline verification** — proves all work done during hackathon period | **Compliance evidence** |
 | [`../SECURITY_AUDIT_REPORT.md`](../SECURITY_AUDIT_REPORT.md) | **111 security issues documented** — comprehensive audit for upstream | **Differentiator** |
 
@@ -26,9 +25,6 @@
 ### For Technical Deep-Dive (5 minutes)
 3. **Implementation Log:** [`IMPLEMENTATION_SCOPE.md`](IMPLEMENTATION_SCOPE.md) — 31KB of build notes
 4. **Test Coverage:** [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) — 906 tests, CI pipeline
-
-### For Screencast Recording
-5. **Demo Script:** [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) — Exact timestamps and narration
 
 ---
 
