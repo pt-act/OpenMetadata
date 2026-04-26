@@ -1,4 +1,4 @@
-# DEVELOPER.md
+# Testing Strategy
 
 ## CI Workflows
 

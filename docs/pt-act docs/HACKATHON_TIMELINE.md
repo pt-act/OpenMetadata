@@ -30,7 +30,7 @@ Message: feat(mcp): E10 rank_assets_by_cost + E11 suggest_test_cases + bench exp
 ## Key Metrics at Submission
 
 - **24 MCP tools** (12 upstream broken → 24 production-grade)
-- **906 tests** (all passing)
+- **908 tests** (all passing)
 - **62 benchmark fixtures**
 - **100% tool-selection accuracy** (up from 19%)
 - **Security audit:** 111 issues documented, 1 fixed from fork

@@ -1,9 +1,10 @@
 # GitHub Actions Security Audit Report
 
 **Date:** April 25, 2026  
-**Auditor:** Community Security Contributor  
-**Scope:** GitHub Actions Workflows, Java Backend, Python Ingestion/Framework   
-**Total Issues:** 111 (110 inherited from upstream, 1 fixed from fork)  
+**Auditor:** Ricardo Almeida ([@rial1](https://github.com/rial1) / fork maintainer [pt-act](https://github.com/pt-act))  
+**Scope:** GitHub Actions Workflows, Java Backend, Python Ingestion/Framework  
+**Total Issues:** 111 (110 inherited from upstream, 1 fork-introduced & fixed)  
+**Standards Referenced:** MITRE CWE (Common Weakness Enumeration)  
 
 ---
 
@@ -29,6 +30,8 @@ This report documents **34 critical security vulnerabilities** detected in the O
 ---
 
 ## 1. Unsafe `pull_request_target` Trigger Usage (23 Issues)
+
+**CWE:** [CWE-829: Inclusion of Functionality from Untrusted Control Sphere](https://cwe.mitre.org/data/definitions/829.html) · [CWE-284: Improper Access Control](https://cwe.mitre.org/data/definitions/284.html)
 
 ### Risk Description
 
@@ -100,6 +103,8 @@ jobs:
 ---
 
 ## 2. Template Injection Vulnerabilities (11 Issues)
+
+**CWE:** [CWE-94: Improper Control of Generation of Code ("Code Injection")](https://cwe.mitre.org/data/definitions/94.html) · [CWE-78: OS Command Injection](https://cwe.mitre.org/data/definitions/78.html)
 
 ### Risk Description
 
@@ -180,7 +185,89 @@ Template expressions (`${{ }}`) referencing untrusted GitHub context fields (PR 
 
 ---
 
-## 3. Fork-Specific Implementation Security
+## 3. Java SQL and SPARQL Injection Vulnerabilities (46 Issues)
+
+**CWE:** [CWE-89: SQL Injection](https://cwe.mitre.org/data/definitions/89.html) · [CWE-943: Improper Neutralization of Special Elements in Data Query Logic](https://cwe.mitre.org/data/definitions/943.html)
+
+### 3.1 Overview
+
+Additional SAST scanning identified **46 SQL and SPARQL injection vulnerabilities** across the Java codebase. These fall into two categories:
+
+| Category | Count | Severity | Origin |
+|----------|-------|----------|--------|
+| SPARQL Injection (RDF/Knowledge Graph) | 28 | High | Upstream OpenMetadata |
+| SQL Injection (DAO Layer) | 17 | High | Upstream OpenMetadata |
+| **SQL Injection (MCP Tools)** | **1** | **High** | **This Fork - FIXED** |
+
+### 3.2 Fork-Specific Issue (FIXED)
+
+#### File: `openmetadata-mcp/src/main/java/org/openmetadata/mcp/tools/SuggestTestCasesTool.java`
+
+**Location:** Line 726 (method `buildRISql()`)
+
+**Vulnerability:**
+```java
+// BEFORE (Vulnerable)
+static String buildRISql(String fqn, List<String> fkColumns) {
+  String columnList = String.join(", ", fkColumns);
+  return String.format(
+      "SELECT * FROM %s WHERE %s IS NULL...",
+      fqn.replace(".", "_"), columnList, ...);
+}
+```
+
+**Risk:** The `fqn` parameter (fully qualified table name) was interpolated directly into SQL without validation. While `fqn` comes from OpenMetadata's internal metadata system, malicious metadata could theoretically inject SQL commands.
+
+**Fix Applied:**
+```java
+// AFTER (Secure)
+static String buildRISql(String fqn, List<String> fkColumns) {
+  // Validate FQN format - only allow safe characters
+  if (!fqn.matches("^[a-zA-Z0-9_\\.]+$")) {
+    throw new IllegalArgumentException("Invalid FQN format: " + fqn);
+  }
+  String safeFqn = fqn.replace(".", "_");
+  // Additional validation for column names
+  for (String col : fkColumns) {
+    if (!col.matches("^[a-zA-Z0-9_]+$")) {
+      throw new IllegalArgumentException("Invalid column name: " + col);
+    }
+  }
+  String columnList = String.join(", ", fkColumns);
+  return String.format(...);
+}
+```
+
+**Status:** ✅ **FIXED** via input validation using regex patterns.
+
+### 3.3 Inherited SQL/SPARQL Injection Issues (45)
+
+| File | Count | Type | Description |
+|------|-------|------|-------------|
+| `PipelineRepository.java` | 19 | SPARQL | RDF knowledge graph query construction |
+| `RdfRepository.java` | 5 | SPARQL | SPARQL update/delete operations |
+| `JenaFusekiStorage.java` | 4 | SPARQL | RDF storage operations |
+| `CollectionDAO.java` | 9 | SQL | UPDATE queries for tag/relationship renaming |
+| `EntityDAO.java` | 7 | SQL | JSON update operations for entity FQN changes |
+| `ActivityStreamPartitionManager.java` | 1 | SQL | Partition management |
+
+**Common Patterns:**
+- `String.format()` used for SPARQL/SQL query construction
+- `StringBuilder.append()` with unescaped input
+- Direct concatenation of entity URIs, FQNs, and identifiers
+
+**Recommended Remediations:**
+1. **Use parameterized queries** where the database/driver supports it
+2. **Implement whitelist validation** for entity names, FQNs, and identifiers
+3. **Escape special characters** in string literals (quotes, semicolons)
+4. **Use prepared statements** for SQL operations in DAO layer
+5. **For SPARQL:** Use RDF libraries that support parameterized queries
+
+---
+
+---
+
+## 4. Fork-Specific Implementation Security
 
 ### MCP Benchmarking Workflows (Created for This Fork)
 
@@ -195,7 +282,7 @@ The MCP benchmarking implementation added to this fork:
 
 ---
 
-## 4. Remediation Priority Matrix
+## 5. Remediation Priority Matrix
 
 ### Immediate (P0)
 
@@ -227,13 +314,15 @@ The MCP benchmarking implementation added to this fork:
 
 ---
 
-## 5. Python SQL Injection in Ingestion Framework (28 Issues)
+## 6. Python SQL Injection in Ingestion Framework (28 Issues)
 
-### 5.1 Overview
+**CWE:** [CWE-89: SQL Injection](https://cwe.mitre.org/data/definitions/89.html)
+
+### 6.1 Overview
 
 Additional SAST scanning identified **28 SQL injection vulnerabilities** in the Python-based metadata ingestion framework. These are all inherited from the upstream OpenMetadata repository.
 
-### 5.2 Affected Components
+### 6.2 Affected Components
 
 | Component | Files | Description |
 |-----------|-------|-------------|
@@ -241,7 +330,7 @@ Additional SAST scanning identified **28 SQL injection vulnerabilities** in the 
 | **Data Quality** | 1 file | Custom SQL validation queries |
 | **Dashboard Sources** | 1 file | Chart/metadata queries |
 
-### 5.3 Critical Issues
+### 6.3 Critical Issues
 
 | File | Line | Vulnerable Pattern | Risk |
 |------|------|-------------------|------|
@@ -252,7 +341,7 @@ Additional SAST scanning identified **28 SQL injection vulnerabilities** in the 
 | `vertica/metadata.py` | 88-92, 96-100, 246-250 | `VERTICA_GET_COLUMNS.format(...)` | Vertica metadata queries |
 | `domodatabase/metadata.py` | 233 | `f'SELECT * FROM "{table_name}"'` | f-string table reference |
 
-### 5.4 High Issues
+### 6.4 High Issues
 
 | File | Count | Description |
 |------|-------|-------------|
@@ -267,7 +356,7 @@ Additional SAST scanning identified **28 SQL injection vulnerabilities** in the 
 | `tableCustomSQLQuery.py` | 1 | Data quality custom SQL |
 | `superset/mixin.py` | 1 | Dashboard chart queries |
 
-### 5.5 Recommended Remediations
+### 6.5 Recommended Remediations
 
 For Python SQLAlchemy-based code:
 
@@ -288,7 +377,7 @@ stmt = select(table).where(table.c.id == user_id)
 result = conn.execute(stmt)
 ```
 
-### 5.6 Context
+### 6.6 Context
 
 These SQL injection issues primarily affect:
 - **Metadata extraction** from source databases (read-only operations)
@@ -307,13 +396,15 @@ However, defense-in-depth principles still apply, especially for:
 
 ---
 
-## 6. XML External Entity (XXE) Vulnerabilities (3 Issues)
+## 7. XML External Entity (XXE) Vulnerabilities (3 Issues)
 
-### 6.1 Overview
+**CWE:** [CWE-611: Improper Restriction of XML External Entity Reference](https://cwe.mitre.org/data/definitions/611.html) · [CWE-776: Improper Restriction of Recursive Entity References ('XML Entity Expansion')](https://cwe.mitre.org/data/definitions/776.html)
+
+### 7.1 Overview
 
 Additional SAST scanning identified **3 XML parsing vulnerabilities** using Python's standard library `xml.etree.ElementTree`. These parsers are vulnerable to XXE (XML External Entity) attacks when processing untrusted XML data.
 
-### 6.2 Affected Files
+### 7.2 Affected Files
 
 | File | Line | Severity | Vulnerable Code | Risk |
 |------|------|----------|-----------------|------|
@@ -321,14 +412,14 @@ Additional SAST scanning identified **3 XML parsing vulnerabilities** using Pyth
 | `ingestion/src/metadata/ingestion/source/database/saphana/cdata_parser.py` | 741 | High | `ET.fromstring(cdata)` | Parses SAP HANA CDATA metadata |
 | `scripts/jacoco_diff_coverage.py` | 128 | High | `ET.parse(report_path).getroot()` | Parses JaCoCo coverage reports |
 
-### 6.3 Risk Description
+### 7.3 Risk Description
 
 XXE attacks can allow:
 - **File disclosure** (reading arbitrary files from the server)
 - **Server-Side Request Forgery (SSRF)** (making HTTP requests from the server)
 - **Denial of Service** (via billion laughs / exponential entity expansion)
 
-### 6.4 Context and Exploitability
+### 7.4 Context and Exploitability
 
 | File | Context | Risk Level |
 |------|---------|------------|
@@ -336,7 +427,7 @@ XXE attacks can allow:
 | **saphana/cdata_parser.py** | Parses CDATA from SAP HANA database metadata | Medium - Typically from controlled database sources |
 | **jacoco_diff_coverage.py** | Parses JaCoCo XML coverage reports | Low - Usually from internal CI artifacts |
 
-### 6.5 Recommended Remediations
+### 7.5 Recommended Remediations
 
 Replace `xml.etree.ElementTree` with **`defusedxml`** library:
 
@@ -370,7 +461,7 @@ root = ET.fromstring(untrusted_xml_data, parser=parser)
 
 ---
 
-## 7. Security Best Practices for GitHub Actions
+## 8. Security Best Practices for GitHub Actions
 
 ### Recommended Workflow Structure
 
@@ -412,7 +503,7 @@ jobs:
 
 ---
 
-## 8. Conclusion
+## 9. Conclusion
 
 **111 security vulnerabilities** were identified:
 - 34 workflow security issues
@@ -438,86 +529,6 @@ The OpenMetadata maintainers should:
    - `ingestion/src/metadata/ingestion/source/dashboard/ssrs/rdl_parser.py` (Critical)
    - `ingestion/src/metadata/ingestion/source/database/saphana/cdata_parser.py`
    - Add `defusedxml` as a project dependency
-
----
-
-## 4. SQL and SPARQL Injection Vulnerabilities (46 Issues)
-
-### 4.1 Overview
-
-Additional SAST scanning identified **46 SQL and SPARQL injection vulnerabilities** across the Java codebase. These fall into two categories:
-
-| Category | Count | Severity | Origin |
-|----------|-------|----------|--------|
-| SPARQL Injection (RDF/Knowledge Graph) | 28 | High | Upstream OpenMetadata |
-| SQL Injection (DAO Layer) | 17 | High | Upstream OpenMetadata |
-| **SQL Injection (MCP Tools)** | **1** | **High** | **This Fork - FIXED** |
-
-### 4.2 Fork-Specific Issue (FIXED)
-
-#### File: `openmetadata-mcp/src/main/java/org/openmetadata/mcp/tools/SuggestTestCasesTool.java`
-
-**Location:** Line 726 (method `buildRISql()`)
-
-**Vulnerability:**
-```java
-// BEFORE (Vulnerable)
-static String buildRISql(String fqn, List<String> fkColumns) {
-  String columnList = String.join(", ", fkColumns);
-  return String.format(
-      "SELECT * FROM %s WHERE %s IS NULL...",
-      fqn.replace(".", "_"), columnList, ...);
-}
-```
-
-**Risk:** The `fqn` parameter (fully qualified table name) was interpolated directly into SQL without validation. While `fqn` comes from OpenMetadata's internal metadata system, malicious metadata could theoretically inject SQL commands.
-
-**Fix Applied:**
-```java
-// AFTER (Secure)
-static String buildRISql(String fqn, List<String> fkColumns) {
-  // Validate FQN format - only allow safe characters
-  if (!fqn.matches("^[a-zA-Z0-9_\\.]+$")) {
-    throw new IllegalArgumentException("Invalid FQN format: " + fqn);
-  }
-  String safeFqn = fqn.replace(".", "_");
-  // Additional validation for column names
-  for (String col : fkColumns) {
-    if (!col.matches("^[a-zA-Z0-9_]+$")) {
-      throw new IllegalArgumentException("Invalid column name: " + col);
-    }
-  }
-  String columnList = String.join(", ", fkColumns);
-  return String.format(...);
-}
-```
-
-**Status:** ✅ **FIXED** via input validation using regex patterns.
-
-### 4.3 Inherited SQL/SPARQL Injection Issues (45)
-
-| File | Count | Type | Description |
-|------|-------|------|-------------|
-| `PipelineRepository.java` | 19 | SPARQL | RDF knowledge graph query construction |
-| `RdfRepository.java` | 5 | SPARQL | SPARQL update/delete operations |
-| `JenaFusekiStorage.java` | 4 | SPARQL | RDF storage operations |
-| `CollectionDAO.java` | 9 | SQL | UPDATE queries for tag/relationship renaming |
-| `EntityDAO.java` | 7 | SQL | JSON update operations for entity FQN changes |
-| `ActivityStreamPartitionManager.java` | 1 | SQL | Partition management |
-
-**Common Patterns:**
-- `String.format()` used for SPARQL/SQL query construction
-- `StringBuilder.append()` with unescaped input
-- Direct concatenation of entity URIs, FQNs, and identifiers
-
-**Recommended Remediations:**
-1. **Use parameterized queries** where the database/driver supports it
-2. **Implement whitelist validation** for entity names, FQNs, and identifiers
-3. **Escape special characters** in string literals (quotes, semicolons)
-4. **Use prepared statements** for SQL operations in DAO layer
-5. **For SPARQL:** Use RDF libraries that support parameterized queries
-
----
 
 ## Appendix: Complete File List
 

@@ -11,9 +11,11 @@ OAuth 2.0 authentication server and 24 production-grade MCP tools for OpenMetada
 | **Tool-selection accuracy** | 21.0% | **100.0%** |
 | **Avg tool calls / request** | 3.4 | **1.3** (−62%) |
 | **Avg latency** | 45 ms | **2 ms** (−96%) |
-| **Test count** | ~50 | **906** (0 failures) |
+| **Test count** | ~50 | **908** (0 failures) |
 
 **How we got here:** 8 bug fixes (F1–F8) that solved real tool-selection failures + 11 expansion groups (E1–E11) that added composite workflows, governance, safety, contracts, SQL lineage, cost ranking, and test intelligence. Every change is backward-compatible, tested, and shaped like an upstream PR.
+
+> **Engineering approach:** This fork was developed using a spec-first agentic engineering workflow — every change traces from a fixed scope document (F-series fixes, E-series expansions) through to a bench fixture and passing tests before landing in `main`. The 19.4% → 100% jump in bench pass rate is the measurable outcome of that process.
 
 Benchmark harness: [`bench-report.baseline.md`](src/test/resources/bench/bench-report.baseline.md) → [`bench-report.current.md`](src/test/resources/bench/bench-report.current.md)
 
@@ -111,7 +113,7 @@ Groups 5–11 are standalone and can be reviewed independently once groups 1–4
 
 ## Test Coverage
 
-906 tests across 52 test files, 0 failures.¹ Key suites:
+908 tests across 46 test files, 0 failures.¹ Key suites:
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|

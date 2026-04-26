@@ -465,7 +465,7 @@
       <artifactId>flyway-mysql</artifactId>
     </dependency>
 
-    <!-- Micrometer Core -->
+    <!-- Micrometer Core (versions managed by micrometer-bom) -->
     <dependency>
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-observation</artifactId>
