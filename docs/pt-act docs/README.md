@@ -51,15 +51,4 @@
 
 ---
 
-## ✅ Pre-Submission Checklist
-
-- [ ] Screencast recorded (3 min max)
-- [ ] README reviewed (judge-first impression)
-- [ ] All tests passing (`mvn test -pl openmetadata-mcp`)
-- [ ] Security audit report reviewed
-- [ ] Submission form completed
-- [ ] Fork link included: `https://github.com/pt-act/OpenMetadata`
-
----
-
 *Last updated: Hackathon submission preparation phase*
