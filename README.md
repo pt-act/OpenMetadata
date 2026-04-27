@@ -16,7 +16,7 @@
 
 # Hackathon Submission Documentation
 
-> **Quick Navigation:** This folder contains supporting documentation for the hackathon submission. The main project README is at [(https://github.com/pt-act/OpenMetadata/tree/main/docs/pt-act%20docs).
+> **Quick Navigation:** This folder contains supporting documentation for the hackathon submission. The main project README is at [`../../openmetadata-mcp/README.md`](../../openmetadata-mcp/README.md).
 
 ---
 
@@ -28,19 +28,19 @@
 | [`UPSTREAM_ALIGNMENT.md`](UPSTREAM_ALIGNMENT.md) | **Strategic positioning** — upstream issue alignment, PR strategy, risk assessment | Optional context |
 | [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) | **CI/CD pipeline details**, OAuth security test matrix, validation approach 
 | [`HACKATHON_TIMELINE.md`](HACKATHON_TIMELINE.md) | **Timeline verification** — proves all work done during hackathon period | **Compliance evidence** |
-| [`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) | **111 security issues documented** — comprehensive audit for upstream | **Differentiator** |
+| [`../SECURITY_AUDIT_REPORT.md`](../SECURITY_AUDIT_REPORT.md) | **111 security issues documented** — comprehensive audit for upstream | **Differentiator** |
 
 ---
 
 ## 🎯 Judge-Friendly Quick Links
 
 ### Start Here (30 seconds)
-1. **Project README:** [`../openmetadata-mcp/README.md`](../openmetadata-mcp/README.md) — At-a-Glance table, 24 tools overview
-2. **Security Audit:** [`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) — 111 issues documented, 1 fixed
+1. **Project README:** [`../../openmetadata-mcp/README.md`](../../openmetadata-mcp/README.md) — At-a-Glance table, 24 tools overview
+2. **Security Audit:** [`../../SECURITY_AUDIT_REPORT.md`](../../SECURITY_AUDIT_REPORT.md) — 111 issues documented, 1 fixed
 
 ### For Technical Deep-Dive (5 minutes)
 3. **Implementation Log:** [`IMPLEMENTATION_SCOPE.md`](IMPLEMENTATION_SCOPE.md) — 31KB of build notes
-4. **Test Coverage:** [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) — 908 tests, CI pipeline
+4. **Test Coverage:** [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) — 906 tests, CI pipeline
 
 ---
 
@@ -48,7 +48,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  24 MCP Tools        908 Tests          100% Bench Pass    │
+│  24 MCP Tools        906 Tests          100% Bench Pass    │
 │  (12→24 expansion)   (0 failures)      (was 19%)          │
 ├─────────────────────────────────────────────────────────────┤
 │  Security Audit: 111 issues documented                     │
@@ -69,6 +69,7 @@
 
 *Last updated: Hackathon submission preparation phase*
 
+---
 ## What is OpenMetadata?
 [OpenMetadata](https://open-metadata.org/)  is a unified metadata platform for data discovery, data observability, and data governance powered by a central metadata repository, in-depth column-level lineage, and seamless team collaboration. It is one of the fastest-growing open-source projects with a vibrant community and adoption by a diverse set of companies in a variety of industry verticals. Based on Open Metadata Standards and APIs, supporting connectors to a wide range of data services, OpenMetadata enables end-to-end metadata management, giving you the freedom to unlock the value of your data assets.
 <div align="center">
