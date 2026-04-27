@@ -16,7 +16,7 @@
 
 # Hackathon Submission Documentation
 
-> **Quick Navigation:** This folder contains supporting documentation for the hackathon submission. The main project README is at [`../openmetadata-mcp/README.md`](../openmetadata-mcp/README.md).
+> **Quick Navigation:** This folder contains supporting documentation for the hackathon submission. The main project README is at [(https://github.com/pt-act/OpenMetadata/tree/main/docs/pt-act%20docs).
 
 ---
 
